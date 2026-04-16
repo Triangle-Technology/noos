@@ -285,16 +285,24 @@ impl CognitiveSession {
     /// Export learned state for cross-session persistence.
     ///
     /// Returns a serializable snapshot of everything Noos learned this session:
-    /// threat associations (Pavlovian), strategy success rates (striatal EMA),
-    /// response calibration, LC gain mode.
+    /// strategy success rates (striatal EMA), response calibration, LC gain
+    /// mode, and LC tick count.
     ///
     /// Application responsibility: serialize (serde_json) and store to disk/DB.
     /// Call at session end or periodically.
     ///
     /// Brain analog: hippocampal→neocortical consolidation — ephemeral learning
     /// becomes persistent through explicit transfer (Diekelmann & Born 2010).
+    ///
+    /// The LC (tick + gain_mode) mutates in-memory during `process_message`
+    /// via `nudge_gain_from_confidence` and `set_arousal`, but those mutations
+    /// live on the LC struct rather than on `model.learned`. This method
+    /// flushes the LC state into the returned snapshot so a subsequent
+    /// `import_learned` restores the exact gain trajectory.
     pub fn export_learned(&self) -> LearnedState {
-        self.model.learned.clone()
+        let mut snapshot = self.model.learned.clone();
+        self.lc.sync_to_learned(&mut snapshot);
+        snapshot
     }
 
     /// Mutable: restores cross-session learning from a previous session.
@@ -537,6 +545,15 @@ mod tests {
             || !learned.response_success.is_empty()
             || learned.tick > 0;
         assert!(has_data, "Should have learned some cross-session data");
+
+        // `export_learned` must flush LC tick — 8 converge() calls should
+        // have ticked nudge_gain_from_confidence at least once. A tick of 0
+        // means the LC→LearnedState sync is missing (silent data loss bug).
+        assert!(
+            learned.tick > 0,
+            "LC tick must be flushed into exported LearnedState, got {}",
+            learned.tick
+        );
 
         // New session with imported state.
         let session2 = CognitiveSession::with_learned(learned.clone(), 64);

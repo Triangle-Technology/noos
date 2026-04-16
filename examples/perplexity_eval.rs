@@ -31,10 +31,7 @@ use noos::types::intervention::CognitiveState;
 
 fn main() {
     #[cfg(not(feature = "candle"))]
-    {
-        eprintln!("Requires `candle` feature: cargo run --features candle --example perplexity_eval");
-        return;
-    }
+    eprintln!("Requires `candle` feature: cargo run --features candle --example perplexity_eval");
 
     #[cfg(feature = "candle")]
     run();

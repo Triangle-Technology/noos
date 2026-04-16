@@ -586,6 +586,10 @@ fn print_regulator_diagnostics(m: &RunMetrics) {
                         "    RepeatedFailurePattern  cluster={cluster}  count={failure_count}"
                     );
                 }
+                other => {
+                    // Future CircuitBreakReason variants — render generically.
+                    println!("    {other:?}");
+                }
             }
         }
     }

@@ -226,6 +226,11 @@ fn main() {
                     spans.len()
                 );
             }
+            other => {
+                // Future Decision variants — keep the demo running rather
+                // than panic if the enum grows.
+                println!("Decision: {other:?} — not exercised by this demo\n");
+            }
         }
     }
 
@@ -278,6 +283,10 @@ fn print_circuit_break(reason: &CircuitBreakReason, suggestion: &str, turn_num: 
             println!("  reason:              RepeatedFailurePattern");
             println!("  cluster:             {cluster}");
             println!("  failure_count:       {failure_count}");
+        }
+        other => {
+            // Future CircuitBreakReason variants — render generically.
+            println!("  reason:              {other:?}");
         }
     }
     println!("  suggestion:          {suggestion}");

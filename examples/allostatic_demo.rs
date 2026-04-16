@@ -399,10 +399,6 @@ fn make_demo_atom(id: &str, content: &str, topics: Vec<String>, importance: f64)
     }
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max { s.to_string() } else { format!("{}…", &s[..max]) }
-}
-
 #[allow(dead_code)]
 fn print_signals_row(turn_num: usize, turn: &TurnResult) {
     println!("  {:<4} {:<10.3} {:<10.3} {:<10.3} {:<10.3} {:<8.3}",

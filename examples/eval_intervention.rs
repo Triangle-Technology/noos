@@ -37,10 +37,7 @@ use noos::types::world::GainMode;
 
 fn main() {
     #[cfg(not(feature = "candle"))]
-    {
-        eprintln!("Requires `candle` feature: cargo run --features candle --example eval_intervention");
-        return;
-    }
+    eprintln!("Requires `candle` feature: cargo run --features candle --example eval_intervention");
 
     #[cfg(feature = "candle")]
     run();

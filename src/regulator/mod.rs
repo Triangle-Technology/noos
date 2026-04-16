@@ -94,7 +94,12 @@ pub use self::state::RegulatorState;
 /// `Regulator` is forgiving about missing or out-of-order events. Fields are
 /// structured so higher-fidelity providers (logprobs, fragment spans) can
 /// populate more detail without breaking callers that have less information.
+///
+/// `#[non_exhaustive]` — future sessions may add event variants (e.g. tool
+/// calls, streaming deltas). Callers matching on `LLMEvent` must include a
+/// wildcard arm.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum LLMEvent {
     /// A new turn begins. The user's message.
     TurnStart {
@@ -168,7 +173,17 @@ pub enum LLMEvent {
 /// v1 `decide()` returns a single `Decision`; callers may call `decide()`
 /// repeatedly or branch on variant. Multi-concern aggregation is a Session
 /// 19+ refinement.
+///
+/// `#[non_exhaustive]` — future sessions may add variants (e.g. a
+/// multi-concern aggregator). Callers matching on `Decision` must include
+/// a wildcard arm.
+///
+/// `#[must_use]` — `Regulator::decide()` produces a control-flow signal
+/// the app is expected to act on. Dropping it on the floor is almost
+/// always a bug.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+#[must_use]
 pub enum Decision {
     /// Continue normally. No intervention required.
     Continue,
@@ -207,7 +222,12 @@ pub enum Decision {
 }
 
 /// Why a `CircuitBreak` fired.
+///
+/// `#[non_exhaustive]` — future sessions may add new circuit-break
+/// reasons. Callers matching on `CircuitBreakReason` must include a
+/// wildcard arm.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum CircuitBreakReason {
     /// Budget cap reached with response quality still poor.
     CostCapReached {

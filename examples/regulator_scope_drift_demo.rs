@@ -205,6 +205,11 @@ fn main() {
             println!("[Decision::LowConfidenceSpans] ({} span(s))", spans.len());
             println!("(Reserved for a future session that wires per-span logprobs.)");
         }
+        other => {
+            // Future Decision variants — keep the demo running rather
+            // than panic if the enum grows.
+            println!("[Decision::{other:?}] (not exercised by this demo)");
+        }
     }
 
     // Extra diagnostics so the reader can see the cost loop also closed.

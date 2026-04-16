@@ -24,10 +24,7 @@ use noos::types::intervention::{DeltaModulation, DeltaModulationSource, LayerTar
 
 fn main() {
     #[cfg(not(feature = "candle"))]
-    {
-        eprintln!("Requires `candle` feature.");
-        return;
-    }
+    eprintln!("Requires `candle` feature.");
 
     #[cfg(feature = "candle")]
     run();
