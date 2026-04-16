@@ -1,6 +1,6 @@
 //! Integration tests — exercise Phase 7 allostatic API as an external consumer.
 //!
-//! These tests use only public re-exports from nous::* and verify that the
+//! These tests use only public re-exports from nous_regulator::* and verify that the
 //! full flow (session creation → per-turn signals → cost tracking → reward
 //! learning → cross-session persistence) works as documented.
 //!
@@ -8,9 +8,9 @@
 //! These validate the COMPOSITION — that parts work together through the
 //! intended public API surface.
 
-use nous::session::CognitiveSession;
-use nous::types::belief::AffectValence;
-use nous::types::world::{GainMode, LearnedState};
+use nous_regulator::session::CognitiveSession;
+use nous_regulator::types::belief::AffectValence;
+use nous_regulator::types::world::{GainMode, LearnedState};
 
 #[test]
 fn full_turn_cycle_produces_signals() {
@@ -158,7 +158,7 @@ fn signals_serialize_for_telemetry() {
     let turn = session.process_message("Hello");
 
     let json = serde_json::to_string(&turn.signals).expect("signals should serialize");
-    let restored: nous::types::intervention::CognitiveSignals =
+    let restored: nous_regulator::types::intervention::CognitiveSignals =
         serde_json::from_str(&json).expect("signals should deserialize");
 
     assert_eq!(restored.gain_mode, turn.signals.gain_mode);

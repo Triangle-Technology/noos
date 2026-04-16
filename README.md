@@ -32,11 +32,11 @@ consult learned corrections before the next generation.
 
 ```toml
 [dependencies]
-nous = "0.1"
+nous-regulator = "0.1"
 ```
 
 ```rust
-use nous::{Decision, LLMEvent, Regulator};
+use nous_regulator::{Decision, LLMEvent, Regulator};
 
 let mut regulator = Regulator::for_user("alice").with_cost_cap(2_000);
 

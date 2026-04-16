@@ -12,23 +12,23 @@
 //! Result: +8.27% avg across 5 SSMs / 6 benchmarks.
 
 #[cfg(feature = "candle")]
-use nous::cognition::delta_modulation::compute_delta_modulation;
+use nous_regulator::cognition::delta_modulation::compute_delta_modulation;
 #[cfg(feature = "candle")]
-use nous::inference::bottleneck::{
+use nous_regulator::inference::bottleneck::{
     compute_channel_variance, BottleneckConfig, BottleneckSteering, CalibrationResult,
 };
 #[cfg(feature = "candle")]
-use nous::inference::cognitive_model::CognitiveModel;
+use nous_regulator::inference::cognitive_model::CognitiveModel;
 #[cfg(feature = "candle")]
-use nous::inference::mamba::{CognitiveMambaModel, HfTokenizer, MambaConfig};
+use nous_regulator::inference::mamba::{CognitiveMambaModel, HfTokenizer, MambaConfig};
 #[cfg(feature = "candle")]
-use nous::inference::model::LocalModel;
+use nous_regulator::inference::model::LocalModel;
 #[cfg(feature = "candle")]
-use nous::inference::tokenizer::NousTokenizer;
+use nous_regulator::inference::tokenizer::NousTokenizer;
 #[cfg(feature = "candle")]
-use nous::math::softmax::softmax_f32;
+use nous_regulator::math::softmax::softmax_f32;
 #[cfg(feature = "candle")]
-use nous::session::CognitiveSession;
+use nous_regulator::session::CognitiveSession;
 
 fn main() {
     #[cfg(not(feature = "candle"))]
@@ -309,7 +309,7 @@ fn compute_avg_cross_entropy(
 fn compute_avg_cross_entropy_cognitive(
     model: &mut CognitiveMambaModel,
     tokens: &[u32],
-    delta_mod: &nous::types::intervention::DeltaModulation,
+    delta_mod: &nous_regulator::types::intervention::DeltaModulation,
 ) -> f64 {
     if tokens.len() < 2 {
         return 0.0;

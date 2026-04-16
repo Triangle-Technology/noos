@@ -196,7 +196,7 @@ pub struct CorrectionPattern {
 ### 4.1 Minimal agent loop with Anthropic SDK
 
 ```rust
-use nous::regulator::{Regulator, LLMEvent, Decision, CircuitBreakReason};
+use nous_regulator::regulator::{Regulator, LLMEvent, Decision, CircuitBreakReason};
 
 let mut regulator = Regulator::for_user("user_123");
 let client = anthropic_sdk::Client::new();
@@ -255,9 +255,9 @@ regulator.on_event(LLMEvent::UserCorrection {
 ### 4.2 Local Mamba agent (keeps Tầng 2 bonus)
 
 ```rust
-use nous::regulator::{Regulator, LLMEvent};
-use nous::inference::mamba::CognitiveMambaModel;
-use nous::inference::cognitive_model::CognitiveModel;
+use nous_regulator::regulator::{Regulator, LLMEvent};
+use nous_regulator::inference::mamba::CognitiveMambaModel;
+use nous_regulator::inference::cognitive_model::CognitiveModel;
 
 let mut regulator = Regulator::for_user("user_456");
 let mut model = CognitiveMambaModel::from_pretrained("state-spaces/mamba-130m-hf", config)?;
@@ -279,7 +279,7 @@ for i in 0..tokens.len() {
 
 ```rust
 // Existing Path 1 users — this still works unchanged
-use nous::session::CognitiveSession;
+use nous_regulator::session::CognitiveSession;
 
 let mut session = CognitiveSession::new();
 let turn = session.process_message("Hello");

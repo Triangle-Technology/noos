@@ -10,7 +10,7 @@
 //! atoms. This separation keeps CognitiveSession sync while supporting
 //! persistent memory backends.
 
-use nous::{
+use nous_regulator::{
     hybrid_recall, ActivationSource, AtomSource, AtomType, InMemoryStore, MemoryAtom,
     MemoryStore, RecallOptions, Synapse, SynapseType,
 };

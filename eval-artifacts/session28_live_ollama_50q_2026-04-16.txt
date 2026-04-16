@@ -1,0 +1,52 @@
+╔════════════════════════════════════════════════════════════════╗
+║  Tier 2.2 — Regulator vs naive-retry baseline (Session 24)      ║
+╚════════════════════════════════════════════════════════════════╝
+
+Mode:        ollama
+Stream:      50 queries, 4-cluster mix
+Retry cap:   5 attempts/query
+Quality bar: retry if < 0.40
+Cost cap:    1000 tokens (regulator arm only)
+
+Per-arm summary (wallclock 16868.1s):
+  arm           served CB_hits attempts  cost   mean_q  total_q     q/1k
+  ────────────────────────────────────────────────────────────────────────────────
+  baseline          50      0       86 64436    0.598    29.90     0.46
+  regulator         50      9       68 12552    0.616    30.80     2.45
+
+Primary comparison:
+  cost_saved = +51884  (80.5%)
+  total_quality delta = +0.90  (regulator - baseline)
+  quality_per_1k_tokens delta = +1.99  (regulator - baseline)
+
+  ✓ Regulator is more cost-efficient by +1.99 quality per 1k tokens.
+
+Regulator diagnostics:
+  scope_drift_flags:     41
+  procedural_warnings:   0
+  queries_circuit_broken: 9
+  circuit_break reasons:
+    QualityDeclineNoRecovery  turns=3  mean_delta=0.20
+    QualityDeclineNoRecovery  turns=3  mean_delta=0.20
+    QualityDeclineNoRecovery  turns=3  mean_delta=0.20
+    QualityDeclineNoRecovery  turns=3  mean_delta=0.20
+    QualityDeclineNoRecovery  turns=3  mean_delta=0.20
+    QualityDeclineNoRecovery  turns=3  mean_delta=0.20
+    QualityDeclineNoRecovery  turns=3  mean_delta=0.20
+    QualityDeclineNoRecovery  turns=3  mean_delta=0.20
+    QualityDeclineNoRecovery  turns=3  mean_delta=0.20
+
+Notes:
+  • Canned mode uses a deterministic quality oracle; numbers are
+    reproducible bit-for-bit on any machine.
+  • Live modes (ollama / anthropic) call real LLMs for response text
+    + tokens_out, but STILL use the synthetic quality oracle. A full
+    publication run needs a real quality grader; that's Session 24b.
+  • Quality-per-1k-tokens is the fair cross-arm metric when the
+    regulator cuts retry loops short — total_quality alone wouldn't
+    weight cost saved against the quality preserved.
+  • `procedural_warnings` = 0 is EXPECTED in this eval structure:
+    the per-query export/import roundtrip drops below-threshold
+    correction records (known trade-off per `Regulator::export`
+    docs). Pattern formation requires within-task accumulation;
+    see `regulator_correction_memory_demo.rs` for that path.

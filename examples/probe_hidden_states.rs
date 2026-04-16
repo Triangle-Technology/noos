@@ -17,12 +17,12 @@
 //! 3. Gate W_read analysis — what dimensions did the trained gate learn to read?
 //! 4. SSM state analysis — does recurrent memory differentiate content?
 
-use nous::errors::NousResult;
-use nous::inference::cognitive_gate::CognitiveGateConfig;
-use nous::inference::mamba::{CognitiveMambaWithGate, HfTokenizer, MambaConfig};
-use nous::inference::model::LocalModel;
-use nous::inference::tokenizer::NousTokenizer;
-use nous::math::vector::cosine_similarity;
+use nous_regulator::errors::NousResult;
+use nous_regulator::inference::cognitive_gate::CognitiveGateConfig;
+use nous_regulator::inference::mamba::{CognitiveMambaWithGate, HfTokenizer, MambaConfig};
+use nous_regulator::inference::model::LocalModel;
+use nous_regulator::inference::tokenizer::NousTokenizer;
+use nous_regulator::math::vector::cosine_similarity;
 
 /// Test prompts covering different cognitive contexts.
 /// Each should activate different processing patterns if the model
@@ -64,7 +64,7 @@ fn main() -> NousResult<()> {
         let tokens = tokenizer.encode(text, false)?;
         let result = model
             .forward_probe(&tokens)
-            .map_err(|e| nous::NousError::Internal(format!("Probe error for {label}: {e}")))?;
+            .map_err(|e| nous_regulator::NousError::Internal(format!("Probe error for {label}: {e}")))?;
         all_results.push((*label, result));
     }
 

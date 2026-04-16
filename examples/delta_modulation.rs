@@ -15,10 +15,10 @@
 //!
 //! See `docs/intervention.md` for the full intervention architecture.
 
-use nous::cognition::delta_modulation::{compute_delta_modulation, compute_layer_targets};
-use nous::session::CognitiveSession;
-use nous::types::intervention::CognitiveState;
-use nous::types::world::GainMode;
+use nous_regulator::cognition::delta_modulation::{compute_delta_modulation, compute_layer_targets};
+use nous_regulator::session::CognitiveSession;
+use nous_regulator::types::intervention::CognitiveState;
+use nous_regulator::types::world::GainMode;
 
 fn main() {
     println!("=== Nous Tầng 2: Delta Modulation Explorer ===\n");

@@ -79,19 +79,19 @@ fn main() {
 }
 
 #[cfg(feature = "candle")]
-use nous::inference::cognitive_model::CognitiveModel;
+use nous_regulator::inference::cognitive_model::CognitiveModel;
 #[cfg(feature = "candle")]
-use nous::inference::mamba::{CognitiveMambaModel, HfTokenizer, MambaConfig};
+use nous_regulator::inference::mamba::{CognitiveMambaModel, HfTokenizer, MambaConfig};
 #[cfg(feature = "candle")]
-use nous::inference::model::LocalModel;
+use nous_regulator::inference::model::LocalModel;
 #[cfg(feature = "candle")]
-use nous::inference::tokenizer::NousTokenizer;
+use nous_regulator::inference::tokenizer::NousTokenizer;
 #[cfg(feature = "candle")]
-use nous::math::softmax::softmax_f32;
+use nous_regulator::math::softmax::softmax_f32;
 #[cfg(feature = "candle")]
-use nous::session::CognitiveSession;
+use nous_regulator::session::CognitiveSession;
 #[cfg(feature = "candle")]
-use nous::types::world::{LearnedState, ResponseStrategy};
+use nous_regulator::types::world::{LearnedState, ResponseStrategy};
 #[cfg(feature = "candle")]
 use std::collections::BTreeMap;
 
@@ -648,7 +648,7 @@ fn run_nous_full(
 fn print_diagnose_row(
     turn_idx: usize,
     q: &Query,
-    turn: &nous::session::TurnResult,
+    turn: &nous_regulator::session::TurnResult,
     cost_accum: f64,
     strategy: Option<AppStrategy>,
     _mode: Option<Mode>,

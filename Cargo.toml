@@ -1,13 +1,13 @@
 [package]
-name = "nous"
-version = "0.1.1"
+name = "nous-regulator"
+version = "0.1.2"
 edition = "2021"
 description = "Reliability layer for Rust LLM agents: scope drift, cost circuit breaks, and procedural correction memory as event-driven Decisions."
 authors = ["TRIANGLE.TECHNOLOGY COMPANY LIMITED"]
 license = "MIT"
 repository = "https://github.com/Triangle-Technology/nous"
 readme = "README.md"
-documentation = "https://docs.rs/nous"
+documentation = "https://docs.rs/nous-regulator"
 keywords = ["llm", "agent", "regulator", "reliability", "circuit-breaker"]
 categories = ["development-tools", "rust-patterns"]
 

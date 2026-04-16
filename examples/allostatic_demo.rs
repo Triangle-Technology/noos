@@ -19,8 +19,8 @@
 //! for users building custom decision policies on raw continuous signals
 //! or running local Mamba inference that needs delta modulation.
 
-use nous::session::{CognitiveSession, TurnResult};
-use nous::{hybrid_recall, AtomSource, AtomType, MemoryAtom, RecallOptions};
+use nous_regulator::session::{CognitiveSession, TurnResult};
+use nous_regulator::{hybrid_recall, AtomSource, AtomType, MemoryAtom, RecallOptions};
 use std::collections::HashMap;
 
 fn main() {

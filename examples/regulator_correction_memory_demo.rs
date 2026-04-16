@@ -4,12 +4,12 @@
 //! Mem0 / Letta / LangChain memory per research agent 3. Shows:
 //!
 //! 1. A user corrects the agent 3 times on the same topic cluster.
-//! 2. [`Regulator::export`](nous::Regulator::export) snapshots the
-//!    learned [`CorrectionPattern`](nous::CorrectionPattern) to a
-//!    serialisable [`RegulatorState`](nous::RegulatorState).
+//! 2. [`Regulator::export`](nous_regulator::Regulator::export) snapshots the
+//!    learned [`CorrectionPattern`](nous_regulator::CorrectionPattern) to a
+//!    serialisable [`RegulatorState`](nous_regulator::RegulatorState).
 //! 3. The snapshot round-trips through `serde_json` — simulating a
 //!    process restart / next session.
-//! 4. [`Regulator::import`](nous::Regulator::import) restores the
+//! 4. [`Regulator::import`](nous_regulator::Regulator::import) restores the
 //!    pattern; on the next [`LLMEvent::TurnStart`] in the same cluster,
 //!    [`Decision::ProceduralWarning`] fires **before** generation.
 //!
@@ -18,7 +18,7 @@
 //! User `user_123` sends four small refactor asks across four sessions
 //! (Sessions 1-3 in Phase 1, Session 4 post-restart in Phase 3). All
 //! four messages hash to the same topic cluster `async+auth` via
-//! [`build_topic_cluster`](nous::cognition). After the first three
+//! [`build_topic_cluster`](nous_regulator::cognition). After the first three
 //! sessions, the user has corrected the agent three times about adding
 //! docstrings. On session 4, before the LLM even generates, the
 //! regulator surfaces the learned rule with `example_corrections`
@@ -44,7 +44,7 @@
 //!   extraction** — content is preserved but the behavioral rule is
 //!   not explicit.
 //! - **Nous**: structurally counts per-cluster corrections. Once
-//!   [`MIN_CORRECTIONS_FOR_PATTERN`](nous::CorrectionStore) is reached,
+//!   [`MIN_CORRECTIONS_FOR_PATTERN`](nous_regulator::CorrectionStore) is reached,
 //!   a [`CorrectionPattern`] is exposed proactively via
 //!   [`Decision::ProceduralWarning`] — no retrieval query, no semantic
 //!   similarity threshold. Raw example texts ride along so the app /
@@ -57,8 +57,8 @@
 
 use std::env;
 
-use nous::regulator::correction::MIN_CORRECTIONS_FOR_PATTERN as MIN_FOR_PATTERN;
-use nous::{Decision, LLMEvent, Regulator, RegulatorState};
+use nous_regulator::regulator::correction::MIN_CORRECTIONS_FOR_PATTERN as MIN_FOR_PATTERN;
+use nous_regulator::{Decision, LLMEvent, Regulator, RegulatorState};
 
 #[path = "regulator_common/mod.rs"]
 mod regulator_common;
@@ -303,7 +303,7 @@ fn canned_turn(
 /// Print a `CorrectionPattern` in a reader-friendly shape. Used by
 /// both Phase 2 (exported state preview) and Phase 3 (post-warning
 /// pattern display) so the two displays are consistent.
-fn print_pattern(cluster: &str, pattern: &nous::CorrectionPattern, indent: &str) {
+fn print_pattern(cluster: &str, pattern: &nous_regulator::CorrectionPattern, indent: &str) {
     println!("{indent}cluster:            {cluster}");
     println!("{indent}  pattern_name:     {}", pattern.pattern_name);
     println!(

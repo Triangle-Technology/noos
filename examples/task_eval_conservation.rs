@@ -36,8 +36,8 @@
 //! reduces to "budget-below-threshold" and is roughly equivalent to the
 //! cost-only tracker. Honest comparison: report both cases.
 
-use nous::session::CognitiveSession;
-use nous::types::intervention::CognitiveSignals;
+use nous_regulator::session::CognitiveSession;
+use nous_regulator::types::intervention::CognitiveSignals;
 
 // ─── Query stream ─────────────────────────────────────────────────────────
 

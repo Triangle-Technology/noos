@@ -10,8 +10,8 @@
 //!
 //! Run: `cargo run --example task_eval_diagnose`
 
-use nous::cognition::detector::{detect_response_strategy, extract_topics};
-use nous::session::CognitiveSession;
+use nous_regulator::cognition::detector::{detect_response_strategy, extract_topics};
+use nous_regulator::session::CognitiveSession;
 
 fn cluster_for(text: &str) -> String {
     // Mirrors world_model.rs::build_topic_cluster (private).

@@ -17,23 +17,23 @@
 //! - Depleted budget → delta gain < 1.0 (conservation)
 
 #[cfg(feature = "candle")]
-use nous::cognition::delta_modulation::compute_delta_modulation;
+use nous_regulator::cognition::delta_modulation::compute_delta_modulation;
 #[cfg(feature = "candle")]
-use nous::inference::cognitive_model::CognitiveModel;
+use nous_regulator::inference::cognitive_model::CognitiveModel;
 #[cfg(feature = "candle")]
-use nous::inference::cognitive_gate::CognitiveGateConfig;
+use nous_regulator::inference::cognitive_gate::CognitiveGateConfig;
 #[cfg(feature = "candle")]
-use nous::inference::mamba::{CognitiveMambaModel, CognitiveMambaWithGate, HfTokenizer, MambaConfig};
+use nous_regulator::inference::mamba::{CognitiveMambaModel, CognitiveMambaWithGate, HfTokenizer, MambaConfig};
 #[cfg(feature = "candle")]
-use nous::inference::model::LocalModel;
+use nous_regulator::inference::model::LocalModel;
 #[cfg(feature = "candle")]
-use nous::inference::tokenizer::NousTokenizer;
+use nous_regulator::inference::tokenizer::NousTokenizer;
 #[cfg(feature = "candle")]
-use nous::math::softmax::softmax_f32;
+use nous_regulator::math::softmax::softmax_f32;
 #[cfg(feature = "candle")]
-use nous::session::{CognitiveSession, TurnResult};
+use nous_regulator::session::{CognitiveSession, TurnResult};
 #[cfg(feature = "candle")]
-use nous::types::world::GainMode;
+use nous_regulator::types::world::GainMode;
 
 fn main() {
     #[cfg(not(feature = "candle"))]
@@ -283,8 +283,8 @@ fn run() {
     println!("Testing Tầng 2 with hand-crafted states to isolate the");
     println!("delta modulation effect from CognitiveSession signal generation.\n");
 
-    use nous::types::belief::AffectValence;
-    use nous::types::intervention::CognitiveState;
+    use nous_regulator::types::belief::AffectValence;
+    use nous_regulator::types::intervention::CognitiveState;
 
     let manual_states: Vec<(&str, CognitiveState)> = vec![
         ("Neutral (control)", CognitiveState::default()),
@@ -357,8 +357,8 @@ fn run() {
     println!();
     println!("Loading CognitiveMambaWithGate (fresh gate, untrained)...");
 
-    use nous::cognition::intervention::build_cognitive_state;
-    use nous::types::intervention::ForwardResult;
+    use nous_regulator::cognition::intervention::build_cognitive_state;
+    use nous_regulator::types::intervention::ForwardResult;
 
     let gate_config = CognitiveGateConfig::from_mamba_config(&MambaConfig::mamba_130m());
     let gate_model = CognitiveMambaWithGate::from_pretrained_with_gate(

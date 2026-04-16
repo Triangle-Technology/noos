@@ -19,13 +19,13 @@
 use candle_core::{Device, Tensor};
 use candle_nn::optim::{AdamW, Optimizer, ParamsAdamW};
 
-use nous::errors::NousResult;
-use nous::inference::cognitive_gate::CognitiveGateConfig;
-use nous::inference::cognitive_model::CognitiveModel;
-use nous::inference::mamba::{CognitiveMambaWithGate, HfTokenizer, MambaConfig};
-use nous::inference::model::LocalModel;
-use nous::inference::tokenizer::NousTokenizer;
-use nous::types::intervention::DeltaModulation;
+use nous_regulator::errors::NousResult;
+use nous_regulator::inference::cognitive_gate::CognitiveGateConfig;
+use nous_regulator::inference::cognitive_model::CognitiveModel;
+use nous_regulator::inference::mamba::{CognitiveMambaWithGate, HfTokenizer, MambaConfig};
+use nous_regulator::inference::model::LocalModel;
+use nous_regulator::inference::tokenizer::NousTokenizer;
+use nous_regulator::types::intervention::DeltaModulation;
 
 /// Sample text for training (when no file is provided).
 /// A mix of factual and conversational content to give the gate
@@ -77,7 +77,7 @@ fn main() -> NousResult<()> {
     let gate_param_count: usize = gate_varmap
         .data()
         .lock()
-        .map_err(|e| nous::NousError::Internal(format!("Lock error: {e}")))?
+        .map_err(|e| nous_regulator::NousError::Internal(format!("Lock error: {e}")))?
         .values()
         .map(|v| v.elem_count())
         .sum();
@@ -90,7 +90,7 @@ fn main() -> NousResult<()> {
     println!("Tokenized: {} tokens from sample text\n", tokens.len());
 
     if tokens.len() < seq_len + 1 {
-        return Err(nous::NousError::Internal(
+        return Err(nous_regulator::NousError::Internal(
             "Sample text too short for training".into(),
         ));
     }
@@ -105,7 +105,7 @@ fn main() -> NousResult<()> {
         ..ParamsAdamW::default()
     };
     let mut optimizer = AdamW::new(gate_vars, params)
-        .map_err(|e| nous::NousError::Internal(format!("Optimizer init error: {e}")))?;
+        .map_err(|e| nous_regulator::NousError::Internal(format!("Optimizer init error: {e}")))?;
 
     // ── Training loop ───────────────────────────────────────────────
     println!("── Training ──\n");
@@ -125,23 +125,23 @@ fn main() -> NousResult<()> {
         // Forward pass (training mode — returns Tensor for gradient flow).
         let logits = model
             .forward_train(input_tokens)
-            .map_err(|e| nous::NousError::Internal(format!("Forward error: {e}")))?;
+            .map_err(|e| nous_regulator::NousError::Internal(format!("Forward error: {e}")))?;
 
         // Cross-entropy loss.
         let targets = Tensor::new(target_tokens.as_slice(), &Device::Cpu)
-            .map_err(|e| nous::NousError::Internal(format!("Target tensor error: {e}")))?;
+            .map_err(|e| nous_regulator::NousError::Internal(format!("Target tensor error: {e}")))?;
 
         let loss = candle_nn::loss::cross_entropy(&logits, &targets)
-            .map_err(|e| nous::NousError::Internal(format!("Loss error: {e}")))?;
+            .map_err(|e| nous_regulator::NousError::Internal(format!("Loss error: {e}")))?;
 
         let loss_val = loss
             .to_scalar::<f32>()
-            .map_err(|e| nous::NousError::Internal(format!("Loss scalar error: {e}")))?;
+            .map_err(|e| nous_regulator::NousError::Internal(format!("Loss scalar error: {e}")))?;
 
         // Backward + optimizer step (only gate params updated).
         optimizer
             .backward_step(&loss)
-            .map_err(|e| nous::NousError::Internal(format!("Backward step error: {e}")))?;
+            .map_err(|e| nous_regulator::NousError::Internal(format!("Backward step error: {e}")))?;
 
         // Inspect gate output (run one token through inference mode).
         model.reset_cache();
@@ -182,7 +182,7 @@ fn main() -> NousResult<()> {
     let gate_changed = gate_varmap
         .data()
         .lock()
-        .map_err(|e| nous::NousError::Internal(format!("Lock error: {e}")))?
+        .map_err(|e| nous_regulator::NousError::Internal(format!("Lock error: {e}")))?
         .iter()
         .filter(|(name, _)| name.contains("w_gate"))
         .any(|(_, var)| {

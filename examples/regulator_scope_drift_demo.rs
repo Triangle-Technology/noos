@@ -47,7 +47,7 @@
 
 use std::env;
 
-use nous::{Decision, LLMEvent, Regulator};
+use nous_regulator::{Decision, LLMEvent, Regulator};
 
 #[path = "regulator_common/mod.rs"]
 mod regulator_common;
@@ -58,7 +58,7 @@ use regulator_common::{call_anthropic, call_ollama};
 /// [`extract_topics`] stop-word + min-length-3 filter). A faithful
 /// refactor stays inside this vocabulary.
 ///
-/// [`extract_topics`]: nous::cognition
+/// [`extract_topics`]: nous_regulator::cognition
 const TASK: &str =
     "Refactor fetch_user to be async. Keep the database lookup logic unchanged.";
 
