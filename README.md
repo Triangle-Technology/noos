@@ -119,8 +119,9 @@ cargo run --example regulator_correction_memory_demo
 ## Eval numbers
 
 50-query mixed-cluster workload, regulator-enabled arm vs naive-retry
-baseline, synthetic quality oracle (deterministic, reproducible
-bit-for-bit):
+baseline.
+
+### Canned (synthetic quality oracle, reproducible bit-for-bit)
 
 |                        | baseline | regulator |   Δ  |
 |------------------------|---------:|----------:|-----:|
@@ -134,9 +135,33 @@ bit-for-bit):
 cargo run --release --example task_eval_real_llm_regulator
 ```
 
-**Caveat**: quality is scored by a synthetic oracle. Live-LLM + live-grader
-validation is a user-runnable follow-up — the harness supports Ollama and
-Anthropic via `-- ollama` / `-- anthropic` flags.
+### Live (phi3:mini via Ollama, 4h41m wallclock)
+
+Same 50-query stream, real LLM for response text + token counts, same
+synthetic quality oracle for scoring.
+
+|                        | baseline | regulator |   Δ  |
+|------------------------|---------:|----------:|-----:|
+| total cost (tokens_out)|   64 436 |    12 552 | **−80.5 %** |
+| total quality          |    29.90 |     30.80 | **+0.90** |
+| quality per 1k tokens  |     0.46 |      2.45 | **+1.99 (+433 %)** |
+| queries circuit-broken |        0 |         9 | — |
+| scope drift flagged    |        — |        41 | — |
+
+```bash
+cargo run --release --example task_eval_real_llm_regulator -- ollama
+```
+
+Why the live cost gap widens: a real small model over-generates on
+uncontrolled retries (baseline burns 4× the canned estimate), while
+the regulator halts retry loops on `QualityDeclineNoRecovery` so cost
+stays near the canned bound. The quality-per-1k-tokens ratio is the
+fair cross-arm metric when the regulator cuts retries short —
+`total_quality` alone under-credits the cost saved.
+
+**Caveat**: both runs use a synthetic quality oracle. Live-LLM cost is
+real, quality is not. A full publication run needs a real grader —
+the harness accepts `-- anthropic` for Claude-graded runs.
 
 ## Status (2026-04-15)
 
