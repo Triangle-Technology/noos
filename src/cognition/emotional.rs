@@ -56,8 +56,7 @@
 //! and the VN patterns had no active eval support. English regex has
 //! active eval support — the -1.86% finding.
 //!
-//! **Proper resolution paths** (see
-//! `memory/project_lexicon_removal_analysis_2026_04_14.md`):
+//! **Proper resolution paths**:
 //!
 //! - **Path A (medium-term target)**: wire `hs_arousal` into
 //!   `CognitiveSession::process_message`. Arousal from SSM hidden-state

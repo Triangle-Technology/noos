@@ -1,18 +1,23 @@
-//! Allostatic Demo — Nous as a closed-loop allostatic controller.
+//! Advanced: `CognitiveSession` walkthrough — the signal layer underneath
+//! `Regulator`.
 //!
 //! Run: `cargo run --example allostatic_demo`
 //!
-//! Demonstrates the Phase 7 allostatic system end-to-end:
-//! 1. Per-turn signals track cognitive state (salience, confidence, conservation)
-//! 2. Body budget is a slow-timescale signal (depletes over many turns)
-//! 3. Strategy learning accumulates via EMA per topic cluster
+//! Demonstrates the `CognitiveSession` API end-to-end:
+//! 1. Per-turn signals (salience, confidence, conservation)
+//! 2. Body budget — slow-timescale depletion signal
+//! 3. Strategy learning via EMA per topic cluster
 //! 4. Cross-session persistence via JSON round-trip
-//! 5. Closed-loop cost tracking (track_cost depletes budget)
-//! 6. Failure detection (recent_quality + rpe signals)
-//! 7. Memory retrieval composes with signals (sync hybrid_recall)
+//! 5. Closed-loop cost tracking (`track_cost` feeds body budget)
+//! 6. Quality-history signal (`recent_quality` + `rpe`)
+//! 7. Memory retrieval composes with signals (sync `hybrid_recall`)
 //!
-//! No candle/model required — operates at text level with CognitiveSession's
-//! non-cortical pipeline (convergence loop, LC gain, body budget, reward learning).
+//! No candle/model required — pure text-level cognitive pipeline
+//! (convergence loop, LC-style gain, body-budget accounting, reward learning).
+//!
+//! Most integrators should prefer `Regulator` (see README). This demo is
+//! for users building custom decision policies on raw continuous signals
+//! or running local Mamba inference that needs delta modulation.
 
 use nous::session::{CognitiveSession, TurnResult};
 use nous::{hybrid_recall, AtomSource, AtomType, MemoryAtom, RecallOptions};
@@ -195,8 +200,8 @@ fn scenario_4_cross_session_persistence() {
 /// budget depletes from real resource consumption → conservation rises →
 /// next turn's signals reflect accumulated cost.
 ///
-/// This is what makes Nous an ACTUAL allostatic controller: it senses its
-/// own cost, not just external stress.
+/// Closes the measurement loop: conservation reflects actual resource
+/// consumption, not just signals inferred from input text.
 fn scenario_5_closed_loop_cost_tracking() {
     println!("\n── Scenario 5: Closed-Loop Cost Tracking ──");
     println!("Application reports cost → budget depletes → signals reflect\n");

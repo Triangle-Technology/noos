@@ -6,11 +6,10 @@
 //!
 //! ## Why this eval matters
 //!
-//! `docs/intervention.md` lists "metacognition (0% unknown detection in
-//! frontier models per MetaMedQA)" as gap #1 of the 6 structural gaps Nous
-//! aspires to close. Tier 1.1-1.4 validated reward learning + conservation;
-//! Tier 1.5 tests whether Nous gives apps a reliable "I don't know this"
-//! signal — the precondition for graceful abstention.
+//! Metacognition (0% unknown detection in frontier models, per MetaMedQA)
+//! is a well-documented LLM weakness. Tier 1.5 tests whether Nous gives
+//! apps a reliable "I don't know this" signal — the precondition for
+//! graceful abstention.
 //!
 //! ## Setup
 //!

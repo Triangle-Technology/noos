@@ -553,10 +553,10 @@ fn run_nous_full(
     let mut per_cat_last_q: BTreeMap<Category, f64> = BTreeMap::new();
     let mut in_shallow = false;
 
-    // Phase 14 Branch A diagnostic mode: per-turn signal trajectory logging.
-    // Enabled by `NOUS_DIAGNOSE=1` env var. Used to understand why conservation
-    // never fires (mode_sw=0) and why confidence never drops on gibberish
-    // (absF1=0) in the base eval run. See `memory/project_finding_real_llm_multi_signal_2026_04_15.md`.
+    // Diagnostic mode: per-turn signal trajectory logging. Enabled by
+    // `NOUS_DIAGNOSE=1` env var. Used to understand why conservation never
+    // fires (mode_sw=0) and why confidence never drops on gibberish (absF1=0)
+    // in the base eval run.
     let diagnose = std::env::var("NOUS_DIAGNOSE").is_ok();
     if diagnose {
         println!("\n  ── NOUS_DIAGNOSE: per-turn signal trajectory ──");

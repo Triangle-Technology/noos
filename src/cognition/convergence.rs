@@ -31,8 +31,8 @@
 //! - `build_threshold_context` applies affect modulation before any threshold
 //!   is computed (Principle 2+4 — affect pre-colors precision)
 //!
-//! Explicit per-connection priority rules are a TODO. See the audit in
-//! memory/feedback_biological_precision.md for the gating corollary.
+//! Explicit per-connection priority rules are a TODO (gating corollary
+//! owed from the precision-signal audit).
 //!
 //! Pure function (except LocusCoeruleus mutation via gain nudge), <25ms, $0 LLM cost.
 

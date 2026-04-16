@@ -370,8 +370,7 @@ pub fn allocate_context_budget(
 /// turns "sum exceeds 1" into "saturated pressure." Whether this matches the
 /// original "demand vs pool capacity" intent is a FIXME — the cancelling
 /// pool factor was likely a stale refactor remnant. Behaviour preserved
-/// (output unchanged) until the pressure semantic is decided in Phase 2 of
-/// the audit follow-up. See `memory/project_nous_status.md`.
+/// (output unchanged) pending a proper pressure-semantic redesign.
 pub fn compute_resource_pressure(allocation: Option<&AllocationResult>) -> f64 {
     match allocation {
         None => 0.5, // Neutral when no allocation data

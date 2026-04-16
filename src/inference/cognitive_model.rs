@@ -6,10 +6,8 @@
 //!
 //! CognitiveModel extends LocalModel with cognitive awareness. Instead of
 //! opaque `forward() → logits`, it accepts DeltaModulation and applies it
-//! during the forward pass — the model IS cognitive, not wrapped by cognition.
-//!
-//! This is the "hợp thể" — unification of cognitive algorithms with model
-//! architecture. See `docs/intervention.md` Tầng 2.
+//! during the forward pass — the model itself receives the modulation
+//! signal, rather than being wrapped by an external cognition layer.
 //!
 //! Key papers:
 //! - Aston-Jones & Cohen 2005 (LC-NE gain modulation of cortical processing)

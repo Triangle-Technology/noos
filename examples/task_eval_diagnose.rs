@@ -1,7 +1,6 @@
 //! Diagnostic for task_eval_synthetic.rs failure.
 //!
-//! Prints the 4 diagnostic signals named in
-//! `memory/project_finding_synthetic_task_eval_2026_04_14.md`:
+//! Prints 4 diagnostic signals used to debug cluster-mismatch bugs:
 //!
 //! 1. Cluster hash for each of the 3 synthetic queries (collision check).
 //! 2. Detected strategy from each of the 3 simulated responses (which the

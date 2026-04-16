@@ -54,8 +54,7 @@
 //!   submodule and gained a `correction_patterns` field so patterns
 //!   survive process restarts.
 //!
-//! See `docs/regulator-design.md` (authoritative spec) and
-//! `memory/project_path2_architecture_plan.md` (implementation roadmap).
+//! See `docs/regulator-design.md` for the authoritative spec.
 
 pub mod correction;
 pub mod cost;

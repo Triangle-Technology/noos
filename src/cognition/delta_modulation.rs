@@ -154,9 +154,8 @@ pub fn compute_delta_modulation(
     // (new plumbing) or tuning `CHURN_FLOOR` / `CHURN_CEILING` on
     // `hs_arousal.rs`. Both are separate work items.
     //
-    // See CR5 check in `memory/project_cr5_check_pivot_2026_04_13.md` and
-    // `project_nous_status.md` phase-4 for the validation-vs-defensive
-    // distinction.
+    // This short-circuit is a defensive choice (trust the gate classification
+    // when it says the input is routine) rather than a validated mechanism.
     if matches!(state.gate_type, GateType::Routine) {
         return DeltaModulation {
             gain_factor: GAIN_NEUTRAL,

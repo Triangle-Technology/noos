@@ -8,8 +8,7 @@
 //! 2026-04-11 SSM research synthesis, these duplicated cortical work:
 //! the model's attention tracks topics across context far better than any
 //! regex, and topic-level prediction errors are computed implicitly in the
-//! model's residual stream. See `memory/feedback_ssm_research_2026_04.md`
-//! for the literature justification.
+//! model's residual stream.
 //!
 //! What remains:
 //! - `update_affect()` — wraps the arousal heuristic (see `emotional.rs` for
@@ -53,8 +52,7 @@ pub fn update_affect(state: &SharedBeliefState, message: &str) -> AffectState {
     // `app-contract.md` §1.1 ("prolonged stress depletes capacity").
     //
     // Pre-2026-04-14 bug: both branches ADDED to sustained, pinning it at 1.0
-    // forever. Surfaced + fixed via `examples/task_eval_conservation.rs`. See
-    // `memory/project_finding_conservation_insensitive_2026_04_14.md`.
+    // forever. Surfaced + fixed via `examples/task_eval_conservation.rs`.
     //
     // Graded threshold (not binary): the regex arousal heuristic rarely exceeds
     // 0.6 for typical stress markers ("HELP!!!" scores ~0.4 on mamba-130m-sized

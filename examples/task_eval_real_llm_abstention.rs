@@ -18,8 +18,8 @@
 //! feature gating compiles. The stub_model_quality placeholder has not been
 //! replaced; do not interpret its F1 numbers as real measurements.
 //!
-//! See `memory/project_finding_real_llm_multi_signal_2026_04_15.md` for the
-//! pivot rationale and findings from the superseding eval.
+//! Superseded by `examples/task_eval_real_llm_multi_signal.rs` (multi-signal
+//! compound eval on real mamba-130m).
 //!
 //! ## What this eval tests
 //!

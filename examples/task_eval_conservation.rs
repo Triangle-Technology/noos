@@ -216,9 +216,8 @@ fn run_cost_threshold(stream: &[(QueryKind, String)]) -> RunResult {
 /// `threshold_body_budget_conservation` base 0.30 to contribute a large
 /// `budget_factor` on realistic session lengths). Using 0.5 as documented
 /// in app-contract.md would never trigger. Using 0.2 matches the signal's
-/// actual mid-range and exercises the switch. See
-/// `memory/project_finding_conservation_insensitive_2026_04_14.md` for the
-/// broader calibration gap still owed.
+/// actual mid-range and exercises the switch. Broader calibration gap
+/// between documented 0.5 threshold and observed mid-range is still owed.
 const NOUS_CONSERVATION_THRESHOLD: f64 = 0.2;
 
 fn run_nous_conservation(stream: &[(QueryKind, String)]) -> RunResult {

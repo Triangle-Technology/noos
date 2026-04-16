@@ -3,7 +3,7 @@
 //! Provides a typed event bus, pluggable extension points, and sequential
 //! pipeline execution for applications building richer flows on top of Nous.
 //!
-//! ## Relationship to Phase 7 (allostatic controller)
+//! ## Relationship to `CognitiveSession`
 //!
 //! This module is **infrastructure**, not part of the core cognitive flow.
 //! `CognitiveSession` does not use it. Applications that need to:

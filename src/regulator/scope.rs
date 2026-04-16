@@ -281,13 +281,12 @@ mod tests {
         assert!((0.0..=1.0).contains(&drift));
     }
 
-    /// Session 18 decision checkpoint: false-positive-rate audit on 10
-    /// hand-crafted cases.
+    /// Design checkpoint: false-positive-rate audit on 10 hand-crafted
+    /// cases.
     ///
-    /// Per `memory/project_path2_architecture_plan.md` Session 18 row:
-    /// "Does keyword-overlap produce believable drift scores on real
-    /// text? If false-positive rate > 20% on 10 hand-crafted test
-    /// cases, reconsider embedding-based detection."
+    /// Does keyword-overlap produce believable drift scores on real text?
+    /// If total error rate (FPR + FNR) > 20% on 10 hand-crafted test cases,
+    /// reconsider embedding-based detection.
     ///
     /// This test encodes the audit. Each case has a manually-assigned
     /// ground-truth label (`should_flag`) and the test asserts that

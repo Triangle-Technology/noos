@@ -3,7 +3,7 @@
 //! Trait-based interface to external LLM services (Anthropic, OpenAI, Google,
 //! Ollama, etc.). Request builders, response parsers, streaming support.
 //!
-//! ## Relationship to Phase 7 (allostatic controller)
+//! ## Relationship to `CognitiveSession`
 //!
 //! This module is **infrastructure**, not part of the core cognitive flow.
 //! `CognitiveSession` does not call `AiProvider` — the session produces

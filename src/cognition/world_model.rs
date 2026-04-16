@@ -204,9 +204,10 @@ pub fn consolidate(
     // - `detected_safe` (Option): returns Some only when the response clearly
     //   matches a known strategy pattern. Used for per-strategy reward learning
     //   so ambiguous responses DON'T poison the `response_strategies` map with
-    //   miscategorized data. Prevents the real-LLM format-variation silent-
-    //   poisoning failure mode documented in
-    //   `memory/project_finding_synthetic_task_eval_2026_04_14.md` §Secondary finding.
+    //   miscategorized data. Prevents a real-LLM format-variation silent-
+    //   poisoning failure mode (when response format doesn't match any
+    //   strategy regex, back-compat wrapper returns DirectAnswer by default,
+    //   polluting the reward-learning signal).
     //
     // - `actual_strategy` (via back-compat wrapper): always returns a strategy
     //   (defaults to DirectAnswer). Used for display/compliance tracking where

@@ -114,9 +114,7 @@ pub struct DimensionPE {
 /// conservation signal topped out ~0.30, never reaching the decision-grade
 /// range implied by `docs/app-contract.md`. Raised base to 0.70 so
 /// `budget_factor` starts contributing at 70% remaining budget — an "early
-/// warning" zone rather than "near empty". See
-/// `memory/project_finding_conservation_insensitive_2026_04_14.md` for the
-/// full calibration analysis.
+/// warning" zone rather than "near empty".
 ///
 /// Relation to `COST_DEPLETION_RATE` (0.02 in `src/session.rs`): per-turn
 /// cost depletion × avg cost ≈ 0.011/turn. With low reported quality
