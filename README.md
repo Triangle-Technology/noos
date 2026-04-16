@@ -193,7 +193,7 @@ passing, zero clippy warnings on demos.
   abrupt drops).
 
 Full honest-scope table + full session-by-session project status in
-[`CLAUDE.md`](https://github.com/Triangle-Technology/nous/blob/main/CLAUDE.md) on the
+[`CLAUDE.md`](https://github.com/Triangle-Technology/noos/blob/main/CLAUDE.md) on the
 source repo (not published to crates.io — it cross-references internal
 memory files that stay private).
 

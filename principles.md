@@ -7,7 +7,7 @@
 > and similar point at internal architecture notes that live in the
 > source repo on GitHub but are not published to crates.io (they use
 > biological framing that the public surface intentionally doesn't).
-> Find them at <https://github.com/Triangle-Technology/nous/tree/main/docs> if you
+> Find them at <https://github.com/Triangle-Technology/noos/tree/main/docs> if you
 > need the deep context.
 
 **Principles at a glance:**
