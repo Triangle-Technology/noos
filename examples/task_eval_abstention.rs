@@ -50,8 +50,8 @@
 //! - **Harm**: count of false-positive answers (answered novel → low quality
 //!   delivered to user).
 
-use nous_regulator::session::CognitiveSession;
-use nous_regulator::types::world::{LearnedState, ResponseStrategy};
+use noos::session::CognitiveSession;
+use noos::types::world::{LearnedState, ResponseStrategy};
 use std::collections::BTreeMap;
 
 // ─── Categories ───────────────────────────────────────────────────────────

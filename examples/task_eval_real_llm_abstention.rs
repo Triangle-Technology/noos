@@ -101,9 +101,9 @@ fn main() {
 }
 
 #[cfg(feature = "candle")]
-use nous_regulator::session::CognitiveSession;
+use noos::session::CognitiveSession;
 #[cfg(feature = "candle")]
-use nous_regulator::types::world::LearnedState;
+use noos::types::world::LearnedState;
 
 #[cfg(feature = "candle")]
 fn main() {

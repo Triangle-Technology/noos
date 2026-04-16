@@ -169,7 +169,7 @@ Research (Barrett 2025, MAST NeurIPS 2025, DEER 2025) motivated a shift from "im
 **Phase 7 API** (2026-04-14) — allostatic controller surface:
 
 ```rust
-use nous_regulator::session::CognitiveSession;
+use noos::session::CognitiveSession;
 
 // Create session (optionally with persisted learned state).
 let mut session = CognitiveSession::new();

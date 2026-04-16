@@ -49,7 +49,7 @@
 //! - **Total quality**: sum of quality served (abstentions = 0).
 //!   Higher = better but only if abstention timing is right.
 
-use nous_regulator::session::CognitiveSession;
+use noos::session::CognitiveSession;
 
 const STREAM_LEN: usize = 50;
 const DEGRADATION_TURN: usize = 25; // turns 0..24 high quality, 25..49 low

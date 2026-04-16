@@ -17,7 +17,7 @@
 //! different surgical fix (e.g., valence-conditioning, or confidence-based
 //! damping).
 
-use nous_regulator::session::CognitiveSession;
+use noos::session::CognitiveSession;
 
 fn main() {
     println!("=== Gate classification diagnostic ===\n");
@@ -71,7 +71,7 @@ fn main() {
         let gate = format!("{:?}", turn.gate_type);
         let valence = format!("{:?}", turn.valence);
         let gain = turn.delta_modulation.gain_factor;
-        let short_circuit = (gain - 1.0).abs() < 1e-9 && matches!(turn.gate_type, nous_regulator::types::gate::GateType::Routine);
+        let short_circuit = (gain - 1.0).abs() < 1e-9 && matches!(turn.gate_type, noos::types::gate::GateType::Routine);
         let marker = if short_circuit { "✓ PASSTHROUGH" } else { "(compensated)" };
 
         println!(

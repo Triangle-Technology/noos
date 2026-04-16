@@ -19,7 +19,7 @@ emits a small set of `LLMEvent`s. After emitting, you call `decide()`
 and branch on the returned `Decision`. That's the whole API surface.
 
 ```rust
-use nous_regulator::{Decision, LLMEvent, Regulator};
+use noos::{Decision, LLMEvent, Regulator};
 
 let mut regulator = Regulator::for_user(user_id).with_cost_cap(2_000);
 

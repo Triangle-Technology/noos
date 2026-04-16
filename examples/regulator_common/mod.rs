@@ -36,7 +36,7 @@ use serde_json::{json, Value};
 
 /// Tuple returned by both adapters: `(response_text, tokens_in,
 /// tokens_out, wallclock_ms)`. Matches the shape demos feed into
-/// [`nous_regulator::LLMEvent::Cost`].
+/// [`noos::LLMEvent::Cost`].
 pub type TurnTuple = (String, u32, u32, u32);
 
 /// Call Ollama's `/api/chat` endpoint with `stream: false`. Returns the

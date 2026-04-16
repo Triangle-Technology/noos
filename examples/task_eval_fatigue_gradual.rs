@@ -44,7 +44,7 @@
 //! - **H3**: Net total quality favors whichever agent had right balance:
 //!   resist Phase 1 noise + react to Phase 2 trend.
 
-use nous_regulator::session::CognitiveSession;
+use noos::session::CognitiveSession;
 
 const STREAM_LEN: usize = 60;
 const PHASE_BOUNDARY: usize = 30;

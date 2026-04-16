@@ -28,8 +28,8 @@
 //! adaptation (see `docs/task-eval-design.md`). Treat this file as a
 //! behavior illustration, not a measurement.
 
-use nous_regulator::session::CognitiveSession;
-use nous_regulator::types::world::{LearnedState, ResponseStrategy};
+use noos::session::CognitiveSession;
+use noos::types::world::{LearnedState, ResponseStrategy};
 
 /// Simulated application strategies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

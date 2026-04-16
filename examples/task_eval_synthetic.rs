@@ -35,8 +35,8 @@
 //! Headline: Nous warm must beat simple retry by ≥2 stddev on time-to-first-correct
 //! to be anything more than noise on this synthetic task.
 
-use nous_regulator::session::CognitiveSession;
-use nous_regulator::types::world::{LearnedState, ResponseStrategy};
+use noos::session::CognitiveSession;
+use noos::types::world::{LearnedState, ResponseStrategy};
 use std::collections::BTreeMap;
 
 // ─── Task categories and strategies ───────────────────────────────────────

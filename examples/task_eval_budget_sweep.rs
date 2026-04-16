@@ -23,8 +23,8 @@
 //! - Mid budget: tension between conservation (preserve budget for later)
 //!   and quality (use full mode now). The interesting regime.
 
-use nous_regulator::session::CognitiveSession;
-use nous_regulator::types::world::{LearnedState, ResponseStrategy};
+use noos::session::CognitiveSession;
+use noos::types::world::{LearnedState, ResponseStrategy};
 use std::collections::BTreeMap;
 
 // ─── Categories (same as multi_signal) ────────────────────────────────────

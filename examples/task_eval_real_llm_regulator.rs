@@ -96,7 +96,7 @@
 use std::env;
 use std::time::Instant;
 
-use nous_regulator::{CircuitBreakReason, Decision, LLMEvent, Regulator};
+use noos::{CircuitBreakReason, Decision, LLMEvent, Regulator};
 
 #[path = "regulator_common/mod.rs"]
 mod regulator_common;

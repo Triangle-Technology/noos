@@ -9,7 +9,7 @@
 //! - Sampling parameters adapt to cognitive state
 //! - Strategy recommendations emerge from learned patterns
 
-use nous_regulator::session::CognitiveSession;
+use noos::session::CognitiveSession;
 use std::io::{self, BufRead, Write};
 
 fn main() {
@@ -77,13 +77,13 @@ fn main() {
                 let quality = quality.clamp(0.0, 1.0);
                 // Simulate a response based on recommended strategy.
                 let simulated_response = match result.recommended_strategy {
-                    Some(nous_regulator::types::world::ResponseStrategy::StepByStep) => {
+                    Some(noos::types::world::ResponseStrategy::StepByStep) => {
                         "Here's a step-by-step guide:\n1. First, do this\n2. Then, do that\n3. Finally, finish"
                     }
-                    Some(nous_regulator::types::world::ResponseStrategy::ClarifyFirst) => {
+                    Some(noos::types::world::ResponseStrategy::ClarifyFirst) => {
                         "Before I answer, let me ask:\n- What is your goal?\n- What have you tried?"
                     }
-                    Some(nous_regulator::types::world::ResponseStrategy::StructuredAnalysis) => {
+                    Some(noos::types::world::ResponseStrategy::StructuredAnalysis) => {
                         "## Analysis\n### Pros\n- Good point\n### Cons\n- Bad point\n### Recommendation\nDo X."
                     }
                     _ => "Here's a direct answer to your question.",
@@ -100,10 +100,10 @@ fn main() {
     }
 }
 
-fn valence_label(v: nous_regulator::types::belief::AffectValence) -> &'static str {
+fn valence_label(v: noos::types::belief::AffectValence) -> &'static str {
     match v {
-        nous_regulator::types::belief::AffectValence::Positive => "(positive)",
-        nous_regulator::types::belief::AffectValence::Negative => "(negative)",
-        nous_regulator::types::belief::AffectValence::Neutral => "(neutral)",
+        noos::types::belief::AffectValence::Positive => "(positive)",
+        noos::types::belief::AffectValence::Negative => "(negative)",
+        noos::types::belief::AffectValence::Neutral => "(neutral)",
     }
 }

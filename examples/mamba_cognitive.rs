@@ -11,19 +11,19 @@
 //! sampling tricks, but inside the forward pass via delta scaling.
 
 #[cfg(feature = "candle")]
-use nous_regulator::cognition::delta_modulation::compute_delta_modulation;
+use noos::cognition::delta_modulation::compute_delta_modulation;
 #[cfg(feature = "candle")]
-use nous_regulator::inference::cognitive_model::CognitiveModel;
+use noos::inference::cognitive_model::CognitiveModel;
 #[cfg(feature = "candle")]
-use nous_regulator::inference::mamba::{CognitiveMambaModel, HfTokenizer, MambaConfig};
+use noos::inference::mamba::{CognitiveMambaModel, HfTokenizer, MambaConfig};
 #[cfg(feature = "candle")]
-use nous_regulator::inference::model::LocalModel;
+use noos::inference::model::LocalModel;
 #[cfg(feature = "candle")]
-use nous_regulator::inference::tokenizer::NousTokenizer;
+use noos::inference::tokenizer::NousTokenizer;
 #[cfg(feature = "candle")]
-use nous_regulator::types::intervention::{CognitiveState, DeltaModulation};
+use noos::types::intervention::{CognitiveState, DeltaModulation};
 #[cfg(feature = "candle")]
-use nous_regulator::types::world::GainMode;
+use noos::types::world::GainMode;
 
 fn main() {
     #[cfg(not(feature = "candle"))]

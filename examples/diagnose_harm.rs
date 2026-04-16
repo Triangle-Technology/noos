@@ -10,17 +10,17 @@
 //! Uses emotional text from perplexity_eval (the text that showed +5.21% harm).
 
 #[cfg(feature = "candle")]
-use nous_regulator::inference::cognitive_model::CognitiveModel;
+use noos::inference::cognitive_model::CognitiveModel;
 #[cfg(feature = "candle")]
-use nous_regulator::inference::mamba::{CognitiveMambaModel, HfTokenizer, MambaConfig};
+use noos::inference::mamba::{CognitiveMambaModel, HfTokenizer, MambaConfig};
 #[cfg(feature = "candle")]
-use nous_regulator::inference::model::LocalModel;
+use noos::inference::model::LocalModel;
 #[cfg(feature = "candle")]
-use nous_regulator::inference::tokenizer::NousTokenizer;
+use noos::inference::tokenizer::NousTokenizer;
 #[cfg(feature = "candle")]
-use nous_regulator::math::softmax::softmax_f32;
+use noos::math::softmax::softmax_f32;
 #[cfg(feature = "candle")]
-use nous_regulator::types::intervention::{DeltaModulation, DeltaModulationSource, LayerTarget};
+use noos::types::intervention::{DeltaModulation, DeltaModulationSource, LayerTarget};
 
 fn main() {
     #[cfg(not(feature = "candle"))]

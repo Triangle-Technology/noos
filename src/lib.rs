@@ -14,7 +14,7 @@
 //! ## Quick start
 //!
 //! ```rust,no_run
-//! use nous_regulator::{Decision, LLMEvent, Regulator};
+//! use noos::{Decision, LLMEvent, Regulator};
 //!
 //! let mut regulator = Regulator::for_user("alice").with_cost_cap(2_000);
 //!

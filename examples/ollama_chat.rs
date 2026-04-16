@@ -13,8 +13,8 @@
 //! - Stressed input → lower temperature + frequency penalty → focused responses
 //! - Over time: strategy learning, body budget depletion/recovery
 
-use nous_regulator::session::{CognitiveSession, TurnResult};
-use nous_regulator::types::belief::AffectValence;
+use noos::session::{CognitiveSession, TurnResult};
+use noos::types::belief::AffectValence;
 use serde_json::json;
 use std::io::{self, BufRead, Write};
 

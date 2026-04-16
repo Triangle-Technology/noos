@@ -10,7 +10,7 @@
 //! A user asks for help optimising a slow SQL query. Each agent retry
 //! misses the point; quality drops 0.50 → 0.35 → 0.20. Token cost
 //! accumulates at ~400 tokens per turn against a
-//! [`Regulator::with_cost_cap(1_000)`](nous_regulator::Regulator::with_cost_cap).
+//! [`Regulator::with_cost_cap(1_000)`](noos::Regulator::with_cost_cap).
 //! After turn 3, total cost (~1200) passes the cap AND the rolling
 //! mean quality is well below [`POOR_QUALITY_MEAN`] (0.50) — the
 //! cost+quality compound predicate fires and the loop halts.
@@ -60,7 +60,7 @@
 
 use std::env;
 
-use nous_regulator::{CircuitBreakReason, Decision, LLMEvent, Regulator};
+use noos::{CircuitBreakReason, Decision, LLMEvent, Regulator};
 
 #[path = "regulator_common/mod.rs"]
 mod regulator_common;

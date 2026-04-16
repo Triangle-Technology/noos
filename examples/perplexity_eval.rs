@@ -11,23 +11,23 @@
 //! Lower perplexity = model predicts text better.
 
 #[cfg(feature = "candle")]
-use nous_regulator::cognition::delta_modulation::compute_delta_modulation;
+use noos::cognition::delta_modulation::compute_delta_modulation;
 #[cfg(feature = "candle")]
-use nous_regulator::cognition::hs_arousal::arousal_from_hs;
+use noos::cognition::hs_arousal::arousal_from_hs;
 #[cfg(feature = "candle")]
-use nous_regulator::inference::cognitive_model::CognitiveModel;
+use noos::inference::cognitive_model::CognitiveModel;
 #[cfg(feature = "candle")]
-use nous_regulator::inference::mamba::{compute_hs_stats, CognitiveMambaModel, HfTokenizer, MambaConfig};
+use noos::inference::mamba::{compute_hs_stats, CognitiveMambaModel, HfTokenizer, MambaConfig};
 #[cfg(feature = "candle")]
-use nous_regulator::inference::model::LocalModel;
+use noos::inference::model::LocalModel;
 #[cfg(feature = "candle")]
-use nous_regulator::inference::tokenizer::NousTokenizer;
+use noos::inference::tokenizer::NousTokenizer;
 #[cfg(feature = "candle")]
-use nous_regulator::math::softmax::softmax_f32;
+use noos::math::softmax::softmax_f32;
 #[cfg(feature = "candle")]
-use nous_regulator::session::CognitiveSession;
+use noos::session::CognitiveSession;
 #[cfg(feature = "candle")]
-use nous_regulator::types::intervention::CognitiveState;
+use noos::types::intervention::CognitiveState;
 
 fn main() {
     #[cfg(not(feature = "candle"))]
@@ -207,7 +207,7 @@ fn pct_change(baseline: f64, modulated: f64) -> f64 {
 fn compute_avg_cross_entropy(
     model: &mut CognitiveMambaModel,
     tokens: &[u32],
-    delta_mod: Option<&nous_regulator::types::intervention::DeltaModulation>,
+    delta_mod: Option<&noos::types::intervention::DeltaModulation>,
 ) -> f64 {
     if tokens.len() < 2 {
         return 0.0;
@@ -264,8 +264,8 @@ fn compute_avg_cross_entropy_hs(
     tokens: &[u32],
     num_layers: usize,
 ) -> (f64, f64, f64) {
-    use nous_regulator::cognition::delta_modulation::compute_layer_targets;
-    use nous_regulator::cognition::locus_coeruleus::LocusCoeruleus;
+    use noos::cognition::delta_modulation::compute_layer_targets;
+    use noos::cognition::locus_coeruleus::LocusCoeruleus;
 
     if tokens.len() < 2 {
         return (0.0, 0.0, 0.0);
