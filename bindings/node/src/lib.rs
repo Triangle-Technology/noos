@@ -54,7 +54,12 @@ use noos::{
 /// An event to feed into `Regulator.onEvent`. Construct via static
 /// factory methods. The object is opaque; the only inspection
 /// property is `.kind`.
-#[napi]
+///
+/// `js_name = "LLMEvent"` preserves the all-caps acronym — napi-rs 3.x
+/// runs struct names through `Case::Pascal`, which would rewrite
+/// `LLMEvent` → `LlmEvent`. Python binding uses the same class name;
+/// this keeps the JS / Python APIs symmetric.
+#[napi(js_name = "LLMEvent")]
 pub struct LLMEvent {
     inner: RustLLMEvent,
 }
