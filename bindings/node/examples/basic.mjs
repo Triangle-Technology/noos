@@ -58,7 +58,7 @@ function costBreakExample() {
   console.log()
 }
 
-function implicitCorrectionExample() {
+async function implicitCorrectionExample() {
   console.log('── implicit correction (timing-based) ─────────')
   const r = Regulator.forUser('carol')
   r.withImplicitCorrectionWindowSecs(0.5)
