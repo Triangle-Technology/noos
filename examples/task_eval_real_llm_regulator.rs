@@ -656,7 +656,15 @@ fn main() {
         }
     }
 
+    // NOOS_STREAM_LIMIT caps the stream length for quick smoke-tests and
+    // CPU-constrained live runs (S36 post-mortem: phi3:mini on laptop CPU
+    // needs ~10min/call; the full 50-query stream is ~25h wallclock and
+    // stresses the machine to the point of UI freeze). Unset = full 50.
     let stream = generate_stream();
+    let stream = match env::var("NOOS_STREAM_LIMIT").ok().and_then(|s| s.parse::<usize>().ok()) {
+        Some(limit) if limit < stream.len() => stream.into_iter().take(limit).collect(),
+        _ => stream,
+    };
     print_header(&mode, stream.len());
 
     let t0 = Instant::now();
