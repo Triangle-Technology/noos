@@ -342,19 +342,29 @@ fn llm_call(
         ),
         "ollama" => match call_ollama(&task) {
             Ok((text, _ti, tokens_out, _wc)) => (text, tokens_out, true),
-            Err(_) => (
-                cluster.canned_response(idx, retry),
-                cluster.canned_tokens_out(),
-                false,
-            ),
+            Err(e) => {
+                // Surface live-mode failures so silent-canned runs can't
+                // masquerade as live data (S36 post-mortem: pre-TLS-fix
+                // 50-query judge eval silently fell back 100+ times and
+                // produced numbers identical to canned mode).
+                eprintln!("  [ollama fallback: {e}]");
+                (
+                    cluster.canned_response(idx, retry),
+                    cluster.canned_tokens_out(),
+                    false,
+                )
+            }
         },
         "anthropic" => match call_anthropic(&task) {
             Ok((text, _ti, tokens_out, _wc)) => (text, tokens_out, true),
-            Err(_) => (
-                cluster.canned_response(idx, retry),
-                cluster.canned_tokens_out(),
-                false,
-            ),
+            Err(e) => {
+                eprintln!("  [anthropic fallback: {e}]");
+                (
+                    cluster.canned_response(idx, retry),
+                    cluster.canned_tokens_out(),
+                    false,
+                )
+            }
         },
         _ => unreachable!("mode validated in main"),
     };
