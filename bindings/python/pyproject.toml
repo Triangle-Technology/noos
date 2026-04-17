@@ -1,0 +1,37 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "noos-regulator"
+version = "0.1.0"
+description = "Reliability layer for LLM agents: scope drift, cost circuit breaks, and procedural correction memory as event-driven decisions"
+requires-python = ">=3.9"
+authors = [{ name = "TRIANGLE.TECHNOLOGY COMPANY LIMITED" }]
+license = { text = "MIT" }
+readme = "README.md"
+keywords = ["llm", "agent", "regulator", "reliability", "circuit-breaker"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://github.com/Triangle-Technology/noos"
+Repository = "https://github.com/Triangle-Technology/noos"
+"Rust crate" = "https://crates.io/crates/noos"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "noos_regulator"
+strip = true

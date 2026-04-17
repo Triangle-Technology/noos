@@ -58,6 +58,7 @@
 
 pub mod correction;
 pub mod cost;
+pub mod otel;
 pub mod scope;
 pub mod state;
 pub mod token_stats;
@@ -375,6 +376,27 @@ pub struct Regulator {
     /// [`CircuitBreakReason::RepeatedToolCallLoop`] emission in
     /// [`Self::decide`] via [`tools::ToolStatsAccumulator::detected_loop`].
     tools: ToolStatsAccumulator,
+    /// Implicit-correction detection window. When set via
+    /// [`Self::with_implicit_correction_window`], a `TurnStart` that
+    /// arrives within this duration of the previous `TurnComplete` AND
+    /// maps to the same topic cluster is treated as a retry — the
+    /// regulator synthesises a correction record into
+    /// [`CorrectionStore`] using the new `user_message` as the
+    /// correction text. `None` disables the feature (default) — no
+    /// behaviour change from pre-Session-32 versions.
+    implicit_correction_window: Option<std::time::Duration>,
+    /// Timestamp of the most recent `TurnComplete`, captured only when
+    /// [`Self::implicit_correction_window`] is set. `Instant` is not
+    /// `Serialize` and by design does NOT survive
+    /// [`Self::export`] / [`Self::import`] — implicit-correction signal
+    /// is ephemeral (retry-within-seconds never spans process
+    /// restarts).
+    last_turn_complete_at: Option<std::time::Instant>,
+    /// Counter for implicit corrections synthesised since creation /
+    /// last `import`. Exposed via
+    /// [`Self::implicit_corrections_count`] for observability. Not
+    /// persisted (per-process counter).
+    implicit_corrections_count: usize,
 }
 
 impl Regulator {
@@ -392,6 +414,9 @@ impl Regulator {
             correction: CorrectionStore::new(),
             current_topic_cluster: String::new(),
             tools: ToolStatsAccumulator::new(),
+            implicit_correction_window: None,
+            last_turn_complete_at: None,
+            implicit_corrections_count: 0,
         }
     }
 
@@ -404,6 +429,60 @@ impl Regulator {
     /// is [`cost::DEFAULT_TOKEN_CAP`] (10_000).
     pub fn with_cost_cap(mut self, cap_tokens: u32) -> Self {
         self.cost.set_cap(cap_tokens);
+        self
+    }
+
+    /// Builder: enable implicit correction detection. A `TurnStart`
+    /// arriving within `window` of the previous `TurnComplete` AND
+    /// mapping to the same topic cluster is treated as a retry — the
+    /// regulator synthesises a correction record (using the new
+    /// `user_message` as the correction text) against the matching
+    /// cluster.
+    ///
+    /// ## Why this exists
+    ///
+    /// Most chat UIs do NOT emit an explicit
+    /// [`LLMEvent::UserCorrection`] when the user re-asks. They just
+    /// submit another message. Without implicit detection, the
+    /// [`Decision::ProceduralWarning`] path never activates for those
+    /// apps — the strongest wedge of the regulator (procedural memory
+    /// from corrections) stays inert.
+    ///
+    /// ## Heuristic
+    ///
+    /// Two independent signals must both hold:
+    ///
+    /// 1. **Temporal proximity** — retry within the configured window.
+    ///    Typical value: 30–60 seconds. Longer windows catch more
+    ///    deliberate "let me rephrase" edits; shorter windows keep
+    ///    false-positive rate low.
+    /// 2. **Topic continuity** — the new turn maps to the SAME
+    ///    `current_topic_cluster`. Unrelated follow-up questions on a
+    ///    different topic don't fire.
+    ///
+    /// Both gates are required. A 3-second retry on an unrelated topic
+    /// is not a correction; a 3-minute retry on the same topic is
+    /// probably not either.
+    ///
+    /// ## Interaction with explicit `UserCorrection`
+    ///
+    /// Implicit and explicit paths are additive — apps that use both
+    /// will double-count corrections on retries where they also emit
+    /// an explicit event. The expected integration pattern is
+    /// **implicit OR explicit, not both**: choose implicit when the
+    /// app has no native correction signal, explicit when the app can
+    /// distinguish (e.g., a dedicated "this was wrong" button).
+    ///
+    /// ## Persistence
+    ///
+    /// The window setting itself is NOT persisted by
+    /// [`Self::export`] — it's a caller-driven configuration, not
+    /// accumulated state. After `import`, callers must re-apply
+    /// `with_implicit_correction_window(...)` if they want the
+    /// feature active in the restored regulator. The implicit
+    /// counter also resets (per-process counter).
+    pub fn with_implicit_correction_window(mut self, window: std::time::Duration) -> Self {
+        self.implicit_correction_window = Some(window);
         self
     }
 
@@ -427,6 +506,22 @@ impl Regulator {
     pub fn on_event(&mut self, event: LLMEvent) {
         match event {
             LLMEvent::TurnStart { user_message } => {
+                // Capture the PREVIOUS cluster before we overwrite it —
+                // needed for the implicit-correction check below.
+                let previous_cluster = self.current_topic_cluster.clone();
+                // Evaluate the temporal gate now (before `Instant::now()`
+                // drifts further). `within_window` is `false` when the
+                // feature is off OR no previous TurnComplete has landed.
+                let within_window = match (
+                    self.implicit_correction_window,
+                    self.last_turn_complete_at,
+                ) {
+                    (Some(window), Some(last_complete_at)) => {
+                        last_complete_at.elapsed() <= window
+                    }
+                    _ => false,
+                };
+
                 // Reset per-turn statistics before the new turn runs.
                 // The logprob window is per-turn: confidence should not
                 // drag forward from the previous turn's tokens.
@@ -450,6 +545,26 @@ impl Regulator {
                 self.current_topic_cluster = crate::cognition::detector::build_topic_cluster(
                     self.scope.task_tokens(),
                 );
+
+                // Implicit correction gate: both temporal proximity AND
+                // topic continuity must hold. Skip on empty cluster
+                // (build_topic_cluster couldn't identify a topic —
+                // attribution would be garbage) and on first-ever turn
+                // (previous_cluster is empty, never matches).
+                if within_window
+                    && !self.current_topic_cluster.is_empty()
+                    && self.current_topic_cluster == previous_cluster
+                {
+                    // The new `user_message` is the "correction text" —
+                    // it's what the user said after the previous
+                    // response didn't satisfy.
+                    self.correction.record_correction(
+                        &self.current_topic_cluster,
+                        user_message.clone(),
+                    );
+                    self.implicit_corrections_count += 1;
+                }
+
                 // Path 1 cognitive pipeline still runs; downstream signals
                 // continue to update while the Path 2 input adapters grow.
                 let _ = self.session.process_message(&user_message);
@@ -475,6 +590,13 @@ impl Regulator {
                 // the later response replaces the earlier one — mirrors
                 // "last response wins" semantics for retry loops.
                 self.pending_response = Some(full_response);
+                // Stamp the implicit-correction timer only when the
+                // feature is enabled. Calling `Instant::now()` is
+                // cheap but we still gate on the `Option` so idle
+                // regulators don't accrue syscalls they don't need.
+                if self.implicit_correction_window.is_some() {
+                    self.last_turn_complete_at = Some(std::time::Instant::now());
+                }
             }
 
             LLMEvent::Cost {
@@ -618,6 +740,72 @@ impl Regulator {
     /// `success == false`.
     pub fn tool_failure_count(&self) -> usize {
         self.tools.failure_count()
+    }
+
+    /// Count of implicit corrections the regulator has synthesised
+    /// since creation / last `import`. Zero when
+    /// [`Self::with_implicit_correction_window`] has never been called.
+    ///
+    /// Useful for observability: surface "Noos auto-detected N user
+    /// corrections on this session" alongside explicit-correction
+    /// counts. The counter is per-process and resets on `import` (it
+    /// is not persisted in `RegulatorState`).
+    pub fn implicit_corrections_count(&self) -> usize {
+        self.implicit_corrections_count
+    }
+
+    /// One-call snapshot of every numeric observability signal the
+    /// regulator exposes, as a map keyed by stable metric name. Drop
+    /// straight into Prometheus / Datadog / StatsD pipelines without
+    /// calling eight individual accessors.
+    ///
+    /// Keys (all `f64` — counts are widened from their native integer
+    /// types so callers can feed a single type into metrics APIs):
+    ///
+    /// - `noos.confidence` — `[0, 1]`
+    /// - `noos.logprob_coverage` — `[0, 1]`
+    /// - `noos.total_tokens_out` — cumulative output tokens since last `import`
+    /// - `noos.cost_cap_tokens` — current cap
+    /// - `noos.tool_total_calls` — per-turn tool call count
+    /// - `noos.tool_total_duration_ms` — per-turn tool wallclock sum
+    /// - `noos.tool_failure_count` — per-turn tool failures
+    /// - `noos.implicit_corrections_count` — per-process synthesised correction count
+    ///
+    /// Does NOT call [`Self::decide`] — the decision is a separate,
+    /// explicit call point. Snapshots are cheap (adds up individual
+    /// accessor calls); safe to sample every turn or every N turns.
+    ///
+    /// Metric names are prefixed with `noos.` so they don't collide
+    /// with your app's own namespace in a shared metrics system.
+    pub fn metrics_snapshot(&self) -> std::collections::HashMap<String, f64> {
+        let mut m = std::collections::HashMap::new();
+        m.insert("noos.confidence".into(), self.confidence());
+        m.insert("noos.logprob_coverage".into(), self.logprob_coverage());
+        m.insert(
+            "noos.total_tokens_out".into(),
+            self.total_tokens_out() as f64,
+        );
+        m.insert(
+            "noos.cost_cap_tokens".into(),
+            self.cost_cap_tokens() as f64,
+        );
+        m.insert(
+            "noos.tool_total_calls".into(),
+            self.tool_total_calls() as f64,
+        );
+        m.insert(
+            "noos.tool_total_duration_ms".into(),
+            self.tool_total_duration_ms() as f64,
+        );
+        m.insert(
+            "noos.tool_failure_count".into(),
+            self.tool_failure_count() as f64,
+        );
+        m.insert(
+            "noos.implicit_corrections_count".into(),
+            self.implicit_corrections_count() as f64,
+        );
+        m
     }
 
     /// Query the current regulatory decision.
@@ -812,6 +1000,12 @@ impl Regulator {
             correction,
             current_topic_cluster: String::new(),
             tools: ToolStatsAccumulator::new(),
+            // Implicit-correction config + timer + counter are
+            // per-process — callers re-apply `with_implicit_correction_window`
+            // if they want the feature on in the restored regulator.
+            implicit_correction_window: None,
+            last_turn_complete_at: None,
+            implicit_corrections_count: 0,
         }
     }
 
@@ -2091,5 +2285,296 @@ mod tests {
         let reg = Regulator::import(state);
         assert_eq!(reg.user_id(), "legacy");
         assert!(matches!(reg.decide(), Decision::Continue));
+    }
+
+    // ── Implicit correction detection (Session 32) ─────────────────
+    //
+    // These tests use real `Instant` / `std::thread::sleep` with short
+    // windows (50–200 ms). Rust's test harness runs them concurrently
+    // by default so the sleeps overlap, keeping wall-clock cost low.
+
+    #[test]
+    fn implicit_correction_off_by_default_no_synthetic_records() {
+        // Default regulator has no implicit correction window — a
+        // fast same-cluster retry should NOT record a correction.
+        let mut r = Regulator::for_user("u");
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Refactor fetch_user to be async".into(),
+        });
+        r.on_event(LLMEvent::TurnComplete {
+            full_response: "resp".into(),
+        });
+        // Re-ask immediately — no window configured, no correction.
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Fix the fetch_user async refactoring".into(),
+        });
+        assert_eq!(r.implicit_corrections_count(), 0);
+    }
+
+    #[test]
+    fn implicit_correction_fires_on_fast_same_cluster_retry() {
+        let mut r = Regulator::for_user("u")
+            .with_implicit_correction_window(std::time::Duration::from_millis(500));
+
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Refactor fetch_user to be async".into(),
+        });
+        r.on_event(LLMEvent::TurnComplete {
+            full_response: "(unsatisfactory response)".into(),
+        });
+
+        // User re-asks on same topic within 20ms — well under the
+        // 500ms window.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Fix the fetch_user async refactoring".into(),
+        });
+
+        assert_eq!(r.implicit_corrections_count(), 1);
+        // Pattern threshold is 3 — this one correction won't yet fire
+        // ProceduralWarning, but the count should reflect it.
+    }
+
+    #[test]
+    fn implicit_correction_skips_when_window_expires() {
+        // Window is 50ms; we wait 150ms before the retry. Should NOT
+        // fire.
+        let mut r = Regulator::for_user("u")
+            .with_implicit_correction_window(std::time::Duration::from_millis(50));
+
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Refactor fetch_user to be async".into(),
+        });
+        r.on_event(LLMEvent::TurnComplete {
+            full_response: "resp".into(),
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Fix the fetch_user async refactoring".into(),
+        });
+
+        assert_eq!(
+            r.implicit_corrections_count(),
+            0,
+            "retry outside window must not synthesise a correction"
+        );
+    }
+
+    #[test]
+    fn implicit_correction_skips_on_different_cluster() {
+        // Fast retry but on a different topic → not a correction.
+        let mut r = Regulator::for_user("u")
+            .with_implicit_correction_window(std::time::Duration::from_millis(500));
+
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Refactor fetch_user to be async".into(),
+        });
+        r.on_event(LLMEvent::TurnComplete {
+            full_response: "resp".into(),
+        });
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Explain tokio channels and scheduling".into(),
+        });
+
+        assert_eq!(
+            r.implicit_corrections_count(),
+            0,
+            "different-topic follow-up must not count as a correction"
+        );
+    }
+
+    #[test]
+    fn implicit_correction_skips_on_first_ever_turn() {
+        // No previous TurnComplete — last_turn_complete_at is None,
+        // temporal gate should fail closed.
+        let mut r = Regulator::for_user("u")
+            .with_implicit_correction_window(std::time::Duration::from_millis(500));
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Refactor fetch_user to be async".into(),
+        });
+        assert_eq!(r.implicit_corrections_count(), 0);
+    }
+
+    #[test]
+    fn implicit_correction_skips_when_cluster_is_empty() {
+        // A message with no extractable top-2 topics has an empty
+        // cluster — attribution would be garbage, must fail closed.
+        let mut r = Regulator::for_user("u")
+            .with_implicit_correction_window(std::time::Duration::from_millis(500));
+
+        // "ok" and "hi" are both stop-words-like (short) — produce
+        // empty cluster.
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "ok hi".into(),
+        });
+        r.on_event(LLMEvent::TurnComplete {
+            full_response: "greetings".into(),
+        });
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "hi ok".into(),
+        });
+
+        // Both clusters are empty (or at least the new one is) → skip.
+        assert_eq!(r.implicit_corrections_count(), 0);
+    }
+
+    #[test]
+    fn implicit_correction_accumulates_to_pattern_at_threshold() {
+        // Three fast same-cluster retries → after the third TurnStart
+        // the correction count on the cluster hits
+        // MIN_CORRECTIONS_FOR_PATTERN, and a subsequent `decide()`
+        // called pre-generation (before TurnComplete) should fire
+        // ProceduralWarning.
+        //
+        // Message choice: every retry must produce the SAME top-2
+        // alphabetical meaningful words so `build_topic_cluster`
+        // returns the same key. Cluster for all four is
+        // "async+fetch_user" (async < fetch_user alphabetically, and
+        // neither is beaten by any other meaningful word in these
+        // messages — stop-word filter drops "to"/"be"/"the"/"for").
+        let mut r = Regulator::for_user("u")
+            .with_implicit_correction_window(std::time::Duration::from_millis(500));
+
+        // Turn 1 — no prior complete, no implicit correction.
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Refactor fetch_user to be async".into(),
+        });
+        r.on_event(LLMEvent::TurnComplete {
+            full_response: "try 1".into(),
+        });
+
+        // Turn 2 — first implicit correction.
+        // {fix, fetch_user, async, refactoring} → top-2 = {async, fetch_user}
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Fix the fetch_user async refactoring".into(),
+        });
+        r.on_event(LLMEvent::TurnComplete {
+            full_response: "try 2".into(),
+        });
+
+        // Turn 3 — second implicit correction.
+        // {make, fetch_user, async, properly} → top-2 = {async, fetch_user}
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Make fetch_user async properly".into(),
+        });
+        r.on_event(LLMEvent::TurnComplete {
+            full_response: "try 3".into(),
+        });
+
+        // Turn 4 — third implicit correction. This brings the stored
+        // correction count on cluster "async+fetch_user" to 3 =
+        // MIN_CORRECTIONS_FOR_PATTERN.
+        // {update, fetch_user, async, version} → top-2 = {async, fetch_user}
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Update fetch_user to async version".into(),
+        });
+        assert_eq!(
+            r.implicit_corrections_count(),
+            3,
+            "3 fast same-cluster retries → 3 synthesised corrections"
+        );
+
+        // `decide()` called BEFORE TurnComplete (pre-generation probe)
+        // must fire ProceduralWarning — this is the integration the
+        // feature unlocks.
+        let d = r.decide();
+        match d {
+            Decision::ProceduralWarning { patterns } => {
+                assert!(!patterns.is_empty());
+                assert_eq!(patterns[0].learned_from_turns, 3);
+            }
+            other => panic!(
+                "expected ProceduralWarning after 3 implicit corrections, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn metrics_snapshot_exposes_stable_keys() {
+        // Contract: every documented key is present, prefixed with
+        // `noos.`, and the value type is f64. Integrators rely on
+        // stable key names to route metrics into observability
+        // systems — this test pins the contract.
+        let r = Regulator::for_user("m").with_cost_cap(5_000);
+        let snap = r.metrics_snapshot();
+        for key in [
+            "noos.confidence",
+            "noos.logprob_coverage",
+            "noos.total_tokens_out",
+            "noos.cost_cap_tokens",
+            "noos.tool_total_calls",
+            "noos.tool_total_duration_ms",
+            "noos.tool_failure_count",
+            "noos.implicit_corrections_count",
+        ] {
+            assert!(snap.contains_key(key), "missing metric key {key:?}");
+            let v = snap[key];
+            assert!(v.is_finite(), "metric {key} produced non-finite {v}");
+        }
+        // cost_cap_tokens should reflect the builder setting.
+        assert!((snap["noos.cost_cap_tokens"] - 5_000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn metrics_snapshot_tracks_state_changes() {
+        // Snapshot values should move with accumulated events —
+        // covers the common observability pattern "sample before and
+        // after a turn, diff the counters."
+        let mut r = Regulator::for_user("m").with_cost_cap(5_000);
+        let before = r.metrics_snapshot();
+        assert!((before["noos.total_tokens_out"] - 0.0).abs() < 1e-9);
+
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "hello".into(),
+        });
+        r.on_event(LLMEvent::Cost {
+            tokens_in: 10,
+            tokens_out: 150,
+            wallclock_ms: 500,
+            provider: None,
+        });
+        let after = r.metrics_snapshot();
+        assert!((after["noos.total_tokens_out"] - 150.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn implicit_counter_not_persisted_across_import() {
+        // The implicit counter is a per-process observability number,
+        // not part of the snapshot. Round-trip a regulator and confirm
+        // the restored counter starts at zero (while the correction
+        // records themselves DO survive).
+        let mut r = Regulator::for_user("u")
+            .with_implicit_correction_window(std::time::Duration::from_millis(500));
+
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Refactor fetch_user to be async".into(),
+        });
+        r.on_event(LLMEvent::TurnComplete {
+            full_response: "r1".into(),
+        });
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        // Same cluster: {fix, fetch_user, async, refactoring} → top-2
+        // = {async, fetch_user}. Matches prior turn.
+        r.on_event(LLMEvent::TurnStart {
+            user_message: "Fix the fetch_user async refactoring".into(),
+        });
+        assert_eq!(r.implicit_corrections_count(), 1);
+
+        let snapshot = r.export();
+        let restored = Regulator::import(snapshot);
+
+        // Counter resets; the feature must be re-enabled by the
+        // caller via `with_implicit_correction_window` if wanted.
+        assert_eq!(
+            restored.implicit_corrections_count(),
+            0,
+            "counter is per-process; not in RegulatorState"
+        );
     }
 }

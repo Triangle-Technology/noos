@@ -418,4 +418,135 @@ mod tests {
             error_rate * 100.0
         );
     }
+
+    // ── Adversarial tests (Session 31) ─────────────────────────────
+    //
+    // Session 30 audit flagged the keyword-bag metric as under-tested
+    // against known failure modes. These tests document the metric's
+    // behaviour on those shapes so future contributors (and skeptics)
+    // can see exactly what is and isn't caught.
+
+    #[test]
+    fn adversarial_rank_11_keyword_truncation_causes_false_positive() {
+        // KNOWN LIMITATION — documented, not a bug.
+        //
+        // `extract_topics` sorts meaningful words alphabetically then
+        // truncates to top 10. On long task prompts with >10 meaningful
+        // words, alphabetically-late keywords get dropped. A response
+        // that reuses ONLY those dropped keywords appears as 100% drift
+        // even though it's on-topic.
+        //
+        // Task meaningful words (alphabetical):
+        //   async, authentication, cases, error, handling, module,
+        //   operations, proper, refactor, support, timeout, user, yaml
+        // Top-10 kept: async...support
+        // Truncated:   timeout, user, yaml
+        //
+        // Response reuses only {users, configure, timeout, via, yaml}
+        // → overlap 0 against task top-10 → drift=1.0.
+        let mut t = ScopeTracker::new();
+        t.set_task(
+            "refactor user authentication module support async \
+             operations proper error handling timeout cases yaml",
+        );
+        t.set_response("users should configure timeout via yaml");
+        let drift = t.drift_score().expect("both sides populated");
+        assert!(
+            drift >= DRIFT_WARN_THRESHOLD,
+            "rank-11 truncation gotcha documented: on-topic response \
+             scored drift={drift}. Embedding-based fallback for \
+             borderline cases is tracked as a post-0.3.0 follow-up."
+        );
+    }
+
+    #[test]
+    fn adversarial_synonyms_flag_as_drift() {
+        // KNOWN LIMITATION — keyword-bag cannot recognize semantic
+        // equivalence across surface forms. "make async" ~ "non-blocking"
+        // but share zero tokens → drift=1.0.
+        //
+        // The README's competitor matrix explicitly notes this:
+        // "Scope drift" is Noos's weakest wedge versus Phoenix/Arize
+        // embedding-based drift. This test pins the known behaviour
+        // so any future swap (e.g., an optional embedding-based path)
+        // starts with a clear baseline.
+        let mut t = ScopeTracker::new();
+        t.set_task("make this function async");
+        t.set_response("convert to non-blocking code");
+        let drift = t.drift_score().expect("both sides populated");
+        assert!(
+            drift >= DRIFT_WARN_THRESHOLD,
+            "synonym-equivalent response flags as drift={drift} — \
+             expected for surface-form metric"
+        );
+    }
+
+    #[test]
+    fn adversarial_verbose_on_topic_can_overwhelm_task_keywords() {
+        // KNOWN LIMITATION — a verbose on-topic explanation expands
+        // the response keyword bag with peripheral vocabulary. If
+        // alphabetical truncation of the RESPONSE drops every
+        // task-matching word, drift can score high on a correct
+        // answer.
+        //
+        // Task: {explain, runtime, tokio}
+        // Response (after extraction + alphabetical top-10): typically
+        // {applications, async, asynchronous, building, channels,
+        // event-driven, io, network, networking, operations} — none
+        // of which are in the task set. Drift → 1.0.
+        //
+        // This is the false-positive regime the module docs call out
+        // as "on-topic but verbose." Callers with latency budget to
+        // spare can pair Noos's keyword check with an embedding-based
+        // drift check on borderline-high scores.
+        let mut t = ScopeTracker::new();
+        t.set_task("explain tokio runtime");
+        t.set_response(
+            "Tokio is an async runtime for Rust that provides \
+             event-driven networking, timers, scheduled tasks, IO \
+             operations, channels, synchronization primitives, and \
+             utilities for building asynchronous network applications \
+             at scale",
+        );
+        let drift = t.drift_score().expect("both sides populated");
+        assert!(
+            drift > 0.5,
+            "verbose-on-topic false-positive documented: drift={drift}"
+        );
+    }
+
+    #[test]
+    fn case_insensitive_matching_holds() {
+        // Regression guard: `extract_topics` lowercases, so identical
+        // text with different case must score as zero drift.
+        let mut t = ScopeTracker::new();
+        t.set_task("REFACTOR async FUNCTION");
+        t.set_response("refactor ASYNC function");
+        let drift = t.drift_score().expect("both sides populated");
+        assert!(
+            drift < 0.1,
+            "case-insensitive matching must treat identical text as \
+             zero drift (got {drift})"
+        );
+    }
+
+    #[test]
+    fn non_english_response_flags_drift() {
+        // Regression guard: Unicode word splitting must still
+        // produce keywords, and a disjoint-vocabulary response must
+        // flag as high drift. The existing English-only stop-word
+        // list does NOT cover other languages, so non-English text
+        // produces a large keyword bag with zero overlap on an
+        // English task — drift → 1.0, correctly reading as
+        // "off-topic for the task's language and content".
+        let mut t = ScopeTracker::new();
+        t.set_task("explain tokio runtime");
+        t.set_response("dịch chương trình sang tiếng Việt hoàn toàn");
+        let drift = t.drift_score().expect("both sides populated");
+        assert!(
+            drift >= DRIFT_WARN_THRESHOLD,
+            "fully non-overlapping vocabulary must flag high drift \
+             (got {drift})"
+        );
+    }
 }

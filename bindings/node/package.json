@@ -1,0 +1,52 @@
+{
+  "name": "noos-regulator",
+  "version": "0.1.0",
+  "description": "Reliability layer for LLM agents: scope drift, cost circuit breaks, procedural correction memory, tool-call loop detection as event-driven decisions.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "author": "TRIANGLE.TECHNOLOGY COMPANY LIMITED",
+  "homepage": "https://github.com/Triangle-Technology/noos",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Triangle-Technology/noos.git"
+  },
+  "keywords": [
+    "llm",
+    "agent",
+    "regulator",
+    "reliability",
+    "circuit-breaker",
+    "langchain",
+    "openai",
+    "anthropic"
+  ],
+  "engines": {
+    "node": ">= 18"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "npm"
+  ],
+  "napi": {
+    "binaryName": "noos-regulator",
+    "targets": [
+      "x86_64-pc-windows-msvc",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "node --test --experimental-test-coverage __test__",
+    "example": "node examples/basic.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  }
+}

@@ -1,0 +1,40 @@
+version: 2
+updates:
+  # Rust deps for the main crate.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: [dependencies, rust]
+
+  # Rust deps for the Python binding (path dep on main crate is fine).
+  - package-ecosystem: cargo
+    directory: /bindings/python
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: [dependencies, rust, python-binding]
+
+  # Rust deps for the Node binding.
+  - package-ecosystem: cargo
+    directory: /bindings/node
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: [dependencies, rust, node-binding]
+
+  # npm deps for the Node binding.
+  - package-ecosystem: npm
+    directory: /bindings/node
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: [dependencies, node-binding]
+
+  # GitHub Actions workflow actions.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: [dependencies, ci]

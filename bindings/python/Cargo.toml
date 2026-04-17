@@ -1,0 +1,28 @@
+[package]
+name = "noos-python"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Python bindings for the Noos LLM-agent reliability crate"
+license = "MIT"
+authors = ["TRIANGLE.TECHNOLOGY COMPANY LIMITED"]
+repository = "https://github.com/Triangle-Technology/noos"
+
+# The extension module is the Python package. `cdylib` produces a
+# .so / .pyd / .dylib that Python can `import`.
+[lib]
+name = "noos_regulator"
+crate-type = ["cdylib"]
+
+[dependencies]
+# `abi3-py39` produces a stable-ABI wheel that loads on CPython 3.9+
+# without recompiling per minor version — one wheel covers 3.9 / 3.10 /
+# 3.11 / 3.12 / 3.13 etc. Also allows building without a Python
+# interpreter present (useful for CI and source-only environments).
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
+serde_json = "1"
+noos = { path = "../.." }
+
+[profile.release]
+opt-level = 3
+lto = "thin"

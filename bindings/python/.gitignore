@@ -1,0 +1,19 @@
+# Rust build output
+target/
+Cargo.lock
+
+# Python build output (maturin)
+*.so
+*.pyd
+*.dylib
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+dist/
+build/
+wheels/
+
+# Virtual environments
+.venv/
+venv/

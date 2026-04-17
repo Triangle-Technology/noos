@@ -28,6 +28,7 @@ include = [
     "docs/regulator-design.md",
     "docs/regulator-guide.md",
     "docs/app-contract.md",
+    "docs/migrating.md",
 ]
 
 [dependencies]
@@ -66,6 +67,14 @@ features = ["onig"]
 [dev-dependencies]
 approx = "0.5"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Criterion benches. Each `[[bench]]` entry is `harness = false` so
+# criterion drives its own test harness. Benches are NOT in the
+# `include` whitelist — they don't ship in the published crate.
+[[bench]]
+name = "regulator"
+harness = false
 
 [[example]]
 name = "train_gate"

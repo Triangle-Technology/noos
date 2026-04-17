@@ -302,4 +302,122 @@ mod tests {
         assert_eq!(acc.failure_count(), 1);
         assert_eq!(acc.total_results(), 3);
     }
+
+    // ── Adversarial tests (Session 31) ─────────────────────────────
+    //
+    // Session 30 audit flagged the existing test suite as "staged" —
+    // all cases were simple "N same-tool calls in a row" patterns.
+    // These tests cover shapes that could plausibly fool the detector
+    // one way or the other, and document the exact design boundary
+    // ("consecutive same tool at the trailing run, by name, regardless
+    // of args, ignoring historical loops that resolved").
+
+    #[test]
+    fn loop_fires_on_tail_run_after_mixed_prefix() {
+        // Agent starts exploring (A, B), then falls into A×THRESHOLD
+        // at the tail. Detection must look at the trailing run only —
+        // the initial mixed prefix is irrelevant.
+        let mut acc = ToolStatsAccumulator::new();
+        acc.record_call("explore".into(), None);
+        acc.record_call("db.query".into(), None);
+        for _ in 0..TOOL_LOOP_THRESHOLD {
+            acc.record_call("search".into(), None);
+        }
+        let (tool, count) = acc
+            .detected_loop()
+            .expect("tail same-tool run should fire regardless of prefix");
+        assert_eq!(tool, "search");
+        assert_eq!(count, TOOL_LOOP_THRESHOLD);
+    }
+
+    #[test]
+    fn loop_fires_on_same_tool_with_diverging_args() {
+        // The $47k LangChain incident shape: agent "refines" args on
+        // each retry but keeps calling the same tool. Args are opaque
+        // to the detector — only the tool NAME drives loop detection.
+        let mut acc = ToolStatsAccumulator::new();
+        for i in 0..TOOL_LOOP_THRESHOLD {
+            acc.record_call(
+                "search_orders".into(),
+                Some(format!("{{\"user_id\":42,\"attempt\":{i}}}")),
+            );
+        }
+        let (tool, count) = acc
+            .detected_loop()
+            .expect("same name + varying args is still a loop");
+        assert_eq!(tool, "search_orders");
+        assert_eq!(count, TOOL_LOOP_THRESHOLD);
+    }
+
+    #[test]
+    fn over_threshold_returns_actual_count_not_threshold() {
+        // 8 same-tool in a row → count is 8, not 5. The detector
+        // reports the full run depth so apps can surface "loop depth"
+        // for debugging / telemetry.
+        let mut acc = ToolStatsAccumulator::new();
+        for _ in 0..8 {
+            acc.record_call("search".into(), None);
+        }
+        let (_, count) = acc.detected_loop().expect("well over threshold");
+        assert_eq!(count, 8, "count reflects actual run depth, not threshold");
+    }
+
+    #[test]
+    fn resolved_loop_followed_by_short_tail_does_not_fire() {
+        // An earlier same-tool run that RESOLVED (agent switched
+        // strategy) must not fire. Detection is on the trailing run —
+        // a historical loop that the agent moved past is explicitly
+        // out-of-scope.
+        let mut acc = ToolStatsAccumulator::new();
+        // Loop phase — but later interrupted
+        for _ in 0..TOOL_LOOP_THRESHOLD {
+            acc.record_call("search".into(), None);
+        }
+        // Agent recognizes the loop and switches
+        acc.record_call("db.query".into(), None);
+        acc.record_call("db.query".into(), None);
+        assert!(
+            acc.detected_loop().is_none(),
+            "historical loops that resolved are explicitly out-of-scope"
+        );
+    }
+
+    #[test]
+    fn alternating_high_volume_tools_do_not_fire() {
+        // 20 calls alternating A/B — agent IS stuck in a ping-pong,
+        // but this is a different pathology ("A↔B ping-pong") that
+        // RepeatedToolCallLoop does NOT claim to catch. Documented
+        // boundary — a future CircuitBreakReason (e.g.,
+        // AlternatingToolPingPong) could cover this; Noos 0.3.0
+        // deliberately does not.
+        let mut acc = ToolStatsAccumulator::new();
+        for i in 0..20 {
+            let tool = if i % 2 == 0 { "search" } else { "db.query" };
+            acc.record_call(tool.into(), None);
+        }
+        assert!(
+            acc.detected_loop().is_none(),
+            "alternating A/B is not a same-tool consecutive loop by design"
+        );
+    }
+
+    #[test]
+    fn exact_threshold_boundary_both_sides() {
+        // Paired boundary: THRESHOLD-1 silent, THRESHOLD fires. Guards
+        // against an off-by-one regression.
+        let mut under = ToolStatsAccumulator::new();
+        for _ in 0..(TOOL_LOOP_THRESHOLD - 1) {
+            under.record_call("t".into(), None);
+        }
+        assert!(
+            under.detected_loop().is_none(),
+            "THRESHOLD - 1 must not fire"
+        );
+
+        let mut at = ToolStatsAccumulator::new();
+        for _ in 0..TOOL_LOOP_THRESHOLD {
+            at.record_call("t".into(), None);
+        }
+        assert!(at.detected_loop().is_some(), "THRESHOLD must fire");
+    }
 }

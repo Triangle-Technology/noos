@@ -1,14 +1,20 @@
 # Noos
 
-> Reliability infrastructure for Rust LLM agents — scope drift, cost
-> circuit breaks, and procedural correction memory as a small event-driven
-> crate.
+[![CI](https://github.com/Triangle-Technology/noos/actions/workflows/ci.yml/badge.svg)](https://github.com/Triangle-Technology/noos/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/noos.svg)](https://crates.io/crates/noos)
+[![docs.rs](https://docs.rs/noos/badge.svg)](https://docs.rs/noos)
+[![license](https://img.shields.io/crates/l/noos.svg)](LICENSE)
+
+> Reliability layer for Rust LLM agents. Detects tool-call retry loops,
+> learns from user corrections across sessions, halts on cost × quality
+> compound, flags scope drift — all as event-driven decisions, no
+> framework lock-in.
 
 `Regulator` sits between your agent's retry loop and your LLM. Every turn
 your loop runs, you emit a handful of events — user message, LLM response,
-tokens spent, quality signal when you have one. `Regulator` returns a
-`Decision`: `Continue`, `ScopeDriftWarn`, `CircuitBreak`,
-`ProceduralWarning`, or `LowConfidenceSpans`. Your loop branches on the
+tokens spent, tool calls, optional quality signal. `Regulator` returns a
+`Decision`: `Continue`, `CircuitBreak`, `ProceduralWarning`,
+`ScopeDriftWarn`, or `LowConfidenceSpans`. Your loop branches on the
 variant and keeps moving.
 
 Nothing in Noos wraps your LLM client. There is no framework lock-in and no
@@ -17,16 +23,32 @@ your code owns.
 
 ## Problem
 
-Generic agent retry loops burn cost because none of their halt predicates
-watch response quality. Logging layers record the turn after it happens.
-Memory stores hold interaction content but don't extract behavioural
-patterns from corrections. Scope-drift (the LLM answered a *different*
-question) typically reaches the user and only gets caught if the user
-notices.
+Two failure modes cost real money in production:
 
-Noos surfaces these signals *during* the loop so the app can act before
-delivery — strip drifted material, halt on cost × quality compound,
-consult learned corrections before the next generation.
+- **Tool-call retry loops.** A November 2025 LangChain deployment looped
+  between two agents for 11 days and burned through $47,000 before anyone
+  noticed. `max_iterations` and transport-level retry crates don't catch
+  this — the tool call *succeeds* at the protocol level every time; it's
+  the agent's decision to re-invoke the same tool that needs to halt.
+- **Wasted retries on non-retryable errors.** In a 200-task benchmark,
+  90.8% of retries were wasted because systems re-ran hallucinated tool
+  names and doomed re-prompts. A compound halt predicate (cost AND
+  declining quality) catches this where a cost-only budget doesn't.
+
+Two more are slower-burning but corrode trust over time:
+
+- **Procedural correction amnesia.** Content-memory stores (Mem0, Letta,
+  Zep) remember what the user said, but not that the user *keeps pushing
+  back the same way*. The third time a user says "no telemetry",
+  something structural should change before the fourth generation.
+- **Scope drift.** The LLM answered a *different* question than the one
+  asked — typically reaches the user and only gets caught if the user
+  notices.
+
+Noos surfaces all four signals *during* the loop so the app can act
+before delivery: halt a runaway tool loop, halt a cost-burning
+quality-dropping retry loop, consult learned corrections before the next
+generation, strip drifted material.
 
 ## Quick start
 
@@ -58,10 +80,6 @@ regulator.on_event(LLMEvent::Cost {
 
 match regulator.decide() {
     Decision::Continue => { /* send response to user */ }
-    Decision::ScopeDriftWarn { drift_tokens, drift_score, .. } => {
-        // drift_score >= 0.50 means the response added keywords with no
-        // anchor in the task. Strip, re-prompt, or annotate.
-    }
     Decision::CircuitBreak { reason, suggestion } => {
         // Halt the retry loop; surface `suggestion` to the user. The
         // `reason` variant distinguishes CostCapReached /
@@ -72,6 +90,10 @@ match regulator.decide() {
         // the LLM sees the user's prior pushback before generating.
         // Or use the 0.2.2 helper:
         //   let prompt = regulator.inject_corrections(&user_message);
+    }
+    Decision::ScopeDriftWarn { drift_tokens, drift_score, .. } => {
+        // drift_score >= 0.50 means the response added keywords with no
+        // anchor in the task. Strip, re-prompt, or annotate.
     }
     Decision::LowConfidenceSpans { .. } => { /* reserved for future */ }
     // `Decision` is `#[non_exhaustive]` since 0.2.1 — future variants
@@ -84,51 +106,77 @@ Full per-event contract + timing rules (pre- vs post-generation `decide()`
 calls, per-query vs per-task regulator lifetime): see
 [`docs/regulator-guide.md`](docs/regulator-guide.md).
 
+**Migrating from another tool?** See
+[`docs/migrating.md`](docs/migrating.md) for concrete recipes replacing
+LangChain `recursion_limit`, Mem0/Letta content memory, tenacity-style
+retry wrappers, and Langfuse/Arize observability.
+
 ## What this closes that competitors don't
 
-|                             | Log turns | Remember content | Scope drift (pre-delivery) | Cost × quality halt | Tool-call loop halt | Pattern extraction from corrections |
-|-----------------------------|:---------:|:----------------:|:--------------------------:|:-------------------:|:-------------------:|:-----------------------------------:|
-| Langfuse / Arize / Helicone |     ✓     |        —         |             —              |          —          |          —          |                  —                  |
-| Mem0 / Letta / LangChain mem|     —     |        ✓         |             —              |          —          |          —          |                  —                  |
-| Portkey / litellm / OpenRouter|   —     |        —         |             —              |   transport only    |          —          |                  —                  |
-| Tenacity / backoff          |     —     |        —         |             —              |          —          |          —          |                  —                  |
-| LangChain / CrewAI / AutoGen|     ✓     |        ✓         |             —              |   max_iterations    |   max_iterations    |                  —                  |
-| **Noos**                    |     —     |    ✓ structural  |           **✓**            |       **✓**         |       **✓**         |                 **✓**               |
+Leading with the two claims that are net-new across the Python and Rust
+agent ecosystems as of 2026-Q2 — ordering follows strongest wedge first:
 
-Noos is not a logging layer — pair it with Langfuse / Arize / Helicone if
-you want observability on top of the regulatory decisions. The value is
-the real-time decision surface during the loop, not the post-hoc record.
+|                               | Tool-loop halt (structural) | Pattern extraction from corrections | Cost × quality halt | Scope drift (pre-delivery) | Remember content | Log turns |
+|-------------------------------|:---------------------------:|:-----------------------------------:|:-------------------:|:--------------------------:|:----------------:|:---------:|
+| Langfuse / Arize / Helicone   |              —              |                  —                  |          —          |             —              |        —         |     ✓     |
+| Mem0 / Letta / LangMem / Zep  |              —              |           partial¹           |          —          |             —              |        ✓         |     —     |
+| Portkey / litellm / OpenRouter|              —              |                  —                  |   transport only    |             —              |        —         |     —     |
+| Tenacity / backoff            |              —              |                  —                  |          —          |             —              |        —         |     —     |
+| LangGraph / CrewAI / AutoGen  |   max_iterations only²   |                  —                  |   max_iterations    |             —              |        ✓         |     ✓     |
+| **Noos**                      |           **✓**             |                **✓**                |       **✓**         |           **✓**            |   ✓ structural   |     —     |
+
+¹ LangMem (Python) generates procedural patterns by asking an LLM to
+rewrite the system prompt. Noos does it structurally — per-cluster
+correction counting, no LLM-in-the-loop, deterministic, sub-millisecond.
+
+² `recursion_limit` / `maxIterations` count total steps regardless of
+what's repeating. Noos's `RepeatedToolCallLoop` fires on the
+*signature* of a retry pathology: 5+ consecutive invocations of the
+same tool without interleaving. That's the shape of the $47k LangChain
+incident referenced above.
+
+Noos is not a logging layer — pair it with Langfuse / Arize / Helicone
+if you want observability on top of the regulatory decisions. The value
+is the real-time decision surface during the loop, not the post-hoc
+record.
 
 ## Demos
 
-Four flagship demos, each closing one loop competitors cannot. All run
-canned by default (no LLM required); demos 1–3 have `ollama` and
-`anthropic` live modes.
+Five flagship demos, each closing one loop competitors cannot. All run
+canned by default (no LLM required); demos 2–4 have `ollama` and
+`anthropic` live modes; demo 5 is timing-based and canned-only.
 
-- [`regulator_scope_drift_demo`](examples/regulator_scope_drift_demo.rs)
-  — a refactor response adds logging / error handling / telemetry nobody
-  asked for. Output shows the exact `drift_tokens` list pre-delivery.
+- [`regulator_tool_loop_demo`](examples/regulator_tool_loop_demo.rs) *(0.3.0, leads)*
+  — agent calls `search_orders` 5× in a row with tweaked args, each
+  returning an empty result. Protocol-level successful calls — retry /
+  backoff crates don't flag them; `max_iterations` bounds *total*
+  iteration, not consecutive-same-tool. `RepeatedToolCallLoop` fires
+  structurally.
+- [`regulator_correction_memory_demo`](examples/regulator_correction_memory_demo.rs)
+  — 3 explicit corrections build a `CorrectionPattern`; state exports
+  → JSON round-trips → imports; next-session turn on the same cluster
+  fires `ProceduralWarning` pre-generation with stored example
+  corrections attached. Uses `inject_corrections` helper since 0.2.2.
+- [`regulator_implicit_correction_demo`](examples/regulator_implicit_correction_demo.rs) *(0.3.1-dev, new)*
+  — same `ProceduralWarning` outcome as above, but WITHOUT the app
+  having to emit explicit `UserCorrection` events. Three retries
+  within the configured window on the same topic cluster → correction
+  pattern emerges automatically. Directly addresses the adoption gap
+  that "chat UIs rarely surface explicit correction signals".
 - [`regulator_cost_break_demo`](examples/regulator_cost_break_demo.rs)
   — 3 retry turns with declining quality trip
   `CircuitBreak(CostCapReached)` on turn 3. Output demonstrates priority
   ordering (drift warnings on turns 1–2, circuit break dominates on 3).
-- [`regulator_correction_memory_demo`](examples/regulator_correction_memory_demo.rs)
-  — 3 corrections build a `CorrectionPattern`; state exports → JSON
-  round-trips → imports; next-session turn on the same cluster fires
-  `ProceduralWarning` pre-generation with stored example corrections
-  attached. (Uses `inject_corrections` helper since 0.2.2.)
-- [`regulator_tool_loop_demo`](examples/regulator_tool_loop_demo.rs) *(0.3.0)*
-  — agent calls `search_orders` 5× in a row with tweaked args, each
-  returning an empty result. Protocol-level successful calls — retry /
-  backoff crates don't flag them; `max_iterations` bounds all iteration.
-  `RepeatedToolCallLoop` fires structurally on same-tool consecutive
-  count.
+- [`regulator_scope_drift_demo`](examples/regulator_scope_drift_demo.rs)
+  — a refactor response adds logging / error handling / telemetry nobody
+  asked for. Output shows the exact `drift_tokens` list pre-delivery.
 
 ```bash
-cargo run --example regulator_scope_drift_demo
-cargo run --example regulator_cost_break_demo
-cargo run --example regulator_correction_memory_demo
 cargo run --example regulator_tool_loop_demo
+cargo run --example regulator_correction_memory_demo
+cargo run --example regulator_implicit_correction_demo
+cargo run --example regulator_cost_break_demo
+cargo run --example regulator_scope_drift_demo
 ```
 
 ## Eval numbers
@@ -153,7 +201,8 @@ cargo run --release --example task_eval_real_llm_regulator
 ### Live (phi3:mini via Ollama, 4h41m wallclock)
 
 Same 50-query stream, real LLM for response text + token counts, same
-synthetic quality oracle for scoring.
+synthetic quality oracle for scoring. A newer `NOOS_JUDGE=anthropic`
+mode replaces the oracle with Claude-as-judge — see the Caveat below.
 
 |                        | baseline | regulator |   Δ  |
 |------------------------|---------:|----------:|-----:|
@@ -174,9 +223,145 @@ stays near the canned bound. The quality-per-1k-tokens ratio is the
 fair cross-arm metric when the regulator cuts retries short —
 `total_quality` alone under-credits the cost saved.
 
-**Caveat**: both runs use a synthetic quality oracle. Live-LLM cost is
-real, quality is not. A full publication run needs a real grader —
-the harness accepts `-- anthropic` for Claude-graded runs.
+**Caveat**: the two tables above use a synthetic quality oracle.
+Live-LLM cost is real, quality is not. The harness gained a real-judge
+mode in 0.3.1-dev — set `NOOS_JUDGE=anthropic` and the oracle is
+replaced by Claude-as-judge (`claude-haiku-4-5` by default; override
+via `NOOS_JUDGE_MODEL`):
+
+```bash
+NOOS_JUDGE=anthropic \
+  cargo run --release --example task_eval_real_llm_regulator -- ollama
+NOOS_JUDGE=anthropic \
+  cargo run --release --example task_eval_real_llm_regulator -- anthropic
+```
+
+Falls back to the oracle on per-call grader failures so one flaky grade
+doesn't invalidate a 50-query run.
+
+## Observability
+
+One-call metrics snapshot for Prometheus / Datadog / StatsD pipelines
+— no need to call eight individual accessors:
+
+```rust
+let snap = regulator.metrics_snapshot();
+for (key, value) in snap {
+    metrics_client.gauge(&key, value);
+}
+```
+
+All keys are `noos.` prefixed and stable across releases. Covers
+confidence, logprob coverage, cumulative token spend, cost cap, tool
+call / duration / failure counts, and the implicit-correction counter.
+`decide()` is not sampled — it's an explicit call point — so
+`metrics_snapshot()` is cheap enough to call every turn.
+
+## Performance
+
+Criterion benchmarks on the hot path (release build, Windows /
+Ryzen-class CPU — re-run locally with `cargo bench` for your hardware):
+
+| Operation                                | Median | Throughput |
+|------------------------------------------|-------:|-----------:|
+| `on_event(Cost)`                         |  20 ns |   49 M/s   |
+| `on_event(Token)`                        |  44 ns |   23 M/s   |
+| `on_event(ToolCall)`                     | 249 ns |   4.0 M/s  |
+| `decide()` → `Continue`                  | 2.0 µs | 498 K/s    |
+| `decide()` → `ScopeDriftWarn` (full)     | 3.7 µs | 268 K/s    |
+| `on_event(TurnComplete)`                 | 3.9 µs | 255 K/s    |
+| `on_event(TurnStart)`                    |  22 µs |  46 K/s    |
+| `export` → `from_json` roundtrip         | 1.2 µs | 836 K/s    |
+| **Realistic turn** (1 × start + 100 × token + complete + cost + decide) | **30 µs** | 33 K turns/s |
+
+Interpretation: a realistic turn at 100 streamed tokens adds **~30 µs of
+regulator overhead**, dominated by `TurnStart` (keyword extraction /
+cluster computation). An LLM call at 200 tokens/sec runs for ~500 ms
+per turn — Noos overhead is **six orders of magnitude smaller** than
+the LLM latency it wraps. `decide()` on the Continue path is 2 µs, so
+calling it multiple times per turn (pre-generation probe + post-delivery
+probe + per-cost-event probe) remains cheap.
+
+```bash
+cargo bench --bench regulator
+```
+
+Benchmarks are not in the published crate — they live in `benches/`
+for internal measurement only.
+
+## OpenTelemetry GenAI ingestion
+
+If your agent is already instrumented with the [OTel GenAI semantic
+conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), feed
+your spans to Noos without rewiring your event bus:
+
+```rust
+use noos::{regulator::otel, Regulator};
+
+let span: serde_json::Value = get_otel_span_json();
+let mut r = Regulator::for_user("alice");
+for event in otel::events_from_span(&span) {
+    r.on_event(event);
+}
+match r.decide() { /* ... */ }
+```
+
+Maps `gen_ai.user.message` → `TurnStart`, `gen_ai.assistant.message` →
+`TurnComplete`, `gen_ai.usage.*` + span duration → `Cost`, and
+`gen_ai.tool.message` → `ToolCall` / `ToolResult`. See
+[`src/regulator/otel.rs`](src/regulator/otel.rs) for the full attribute
+mapping table.
+
+## Bindings
+
+Cross-language bindings mirror the Rust API 1:1. The event / decision
+vocabulary is identical across all three; the `.kind` string pattern
+replaces Rust's exhaustive `match` where the host language lacks
+data-variant enums.
+
+### Python — `bindings/python/`
+
+```bash
+pip install noos-regulator   # once published; PyO3 abi3-py39 wheels
+```
+
+```python
+from noos_regulator import Regulator, LLMEvent
+
+r = Regulator.for_user("alice")
+r.with_cost_cap(2000)
+r.on_event(LLMEvent.turn_start("Refactor fetch_user"))
+r.on_event(LLMEvent.turn_complete(response))
+r.on_event(LLMEvent.cost(tokens_in=25, tokens_out=800, wallclock_ms=500))
+
+d = r.decide()
+if d.kind == "circuit_break":
+    print(d.suggestion)
+```
+
+See [`bindings/python/README.md`](bindings/python/README.md).
+
+### Node.js / TypeScript — `bindings/node/`
+
+```bash
+npm install noos-regulator   # once published; napi-rs native addon
+```
+
+```typescript
+import { Regulator, LLMEvent } from 'noos-regulator'
+
+const r = Regulator.forUser('alice')
+r.withCostCap(2_000)
+r.onEvent(LLMEvent.turnStart('Refactor fetch_user'))
+r.onEvent(LLMEvent.turnComplete(response))
+r.onEvent(LLMEvent.cost(25, 800, 500, 'anthropic'))
+
+const d = r.decide()
+if (d.kind === 'circuit_break') console.log(d.suggestion)
+```
+
+TypeScript `.d.ts` auto-generated from the Rust source. See
+[`bindings/node/README.md`](bindings/node/README.md).
 
 ## Status (2026-04-17, crate `noos 0.3.0` on crates.io)
 

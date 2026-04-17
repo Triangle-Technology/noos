@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # ── Gate: test + clippy + doc on Ubuntu (fast feedback). ─────────
+  rust-checks:
+    name: Rust (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu-stable
+
+      - name: Check formatting (non-blocking — informational)
+        run: cargo fmt --all -- --check
+        continue-on-error: true
+
+      - name: Clippy (lib + tests + examples)
+        run: cargo clippy --lib --tests --examples
+
+      - name: Tests
+        run: cargo test --all-targets
+
+      - name: Rustdoc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --lib
+
+      # Verify the canned eval still reproduces bit-for-bit. Regression
+      # guard — any change that drifts the Tier 2.2 numbers needs
+      # explicit acknowledgement.
+      - name: Canned eval reproducibility
+        run: |
+          set -e
+          out=$(cargo run --release --example task_eval_real_llm_regulator 2>&1)
+          echo "$out" | grep -q "cost_saved = +4680  (29.2%)" || (echo "canned cost_saved drift" && echo "$out" && exit 1)
+          echo "$out" | grep -q "total_quality delta = +0.90" || (echo "canned quality delta drift" && echo "$out" && exit 1)
+          echo "canned eval reproduced: cost -29.2%, Δq +0.90"
+
+  # ── Cross-platform build + smoke test (catches platform bugs). ──
+  rust-platforms:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.os }}
+
+      - name: Build
+        run: cargo build --lib --tests --examples
+
+      - name: Tests
+        run: cargo test --lib --tests
+
+  # ── Bench smoke: compile only (running 9× criterion = ~30s, too
+  # ── noisy for CI — we guard with a local `cargo bench` habit
+  # ── instead). This job catches "bench code broke" without burning
+  # ── minutes on sampling.
+  bench-smoke:
+    name: Bench smoke (compile-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu-stable
+      - run: cargo bench --bench regulator --no-run
+
+  # ── Python binding (PyO3 + maturin + pytest). abi3-py39 means one
+  # ── wheel covers 3.9+, so we test a recent Python only.
+  python-binding:
+    name: Python binding (ubuntu)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bindings/python
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bindings/python -> target
+          shared-key: python-binding
+
+      - name: Install maturin + test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install maturin pytest
+
+      - name: Build + install the extension
+        run: maturin develop --release
+
+      - name: Run pytest
+        run: pytest tests/ -v
+
+  # ── Node binding (napi-rs 3.x). The Windows-GNU libnode.dll block
+  # ── documented in bindings/node/README.md does NOT apply here —
+  # ── ubuntu-latest has the right toolchain. This job is the
+  # ── first-class validation path for the Node bindings.
+  node-binding:
+    name: Node binding (ubuntu)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bindings/node
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bindings/node -> target
+          shared-key: node-binding
+
+      - name: Install npm deps
+        run: npm install
+
+      - name: Build native addon
+        run: npm run build
+
+      - name: Run tests (node --test)
+        run: npm test
+
+      - name: Run example (smoke)
+        run: npm run example

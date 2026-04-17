@@ -1,0 +1,29 @@
+[package]
+name = "noos-node"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Node.js / TypeScript bindings for the Noos LLM-agent reliability crate"
+license = "MIT"
+authors = ["TRIANGLE.TECHNOLOGY COMPANY LIMITED"]
+repository = "https://github.com/Triangle-Technology/noos"
+
+# The extension module is the Node native addon. `cdylib` produces a
+# .node (renamed from .so / .dll / .dylib) that Node loads via
+# `require()` or `import`.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# napi-rs 3.x has better Windows support (delay-loads libnode at
+# runtime, no `libnode.dll` needed at link time). napi-build is
+# dropped for this reason — the build.rs is empty.
+napi = { version = "3", default-features = false, features = ["napi4"] }
+napi-derive = "3"
+serde_json = "1"
+noos = { path = "../.." }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true

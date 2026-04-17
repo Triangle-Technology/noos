@@ -82,7 +82,19 @@
 //! # Live — Ollama / Anthropic (per-query latency × 50 = 1-5 minute runs):
 //! cargo run --release --example task_eval_real_llm_regulator -- ollama
 //! cargo run --release --example task_eval_real_llm_regulator -- anthropic
+//!
+//! # Live response + Claude-as-judge quality (closes the oracle loop):
+//! NOOS_JUDGE=anthropic \
+//!   cargo run --release --example task_eval_real_llm_regulator -- ollama
+//! NOOS_JUDGE=anthropic \
+//!   cargo run --release --example task_eval_real_llm_regulator -- anthropic
 //! ```
+//!
+//! The judge mode replaces the synthetic quality oracle with a real
+//! grader (`claude-haiku-4-5` by default; override with
+//! `NOOS_JUDGE_MODEL`). Only applies when the response text came from a
+//! live LLM — canned mode ignores the env var because grading a canned
+//! string against itself is meaningless.
 //!
 //! ## What this session delivers
 //!
@@ -100,7 +112,7 @@ use noos::{CircuitBreakReason, Decision, LLMEvent, Regulator};
 
 #[path = "regulator_common/mod.rs"]
 mod regulator_common;
-use regulator_common::{call_anthropic, call_ollama};
+use regulator_common::{call_anthropic, call_anthropic_judge, call_ollama};
 
 // ── Query taxonomy ────────────────────────────────────────────────
 
@@ -297,42 +309,69 @@ impl RunMetrics {
 
 // ── LLM call dispatcher ───────────────────────────────────────────
 
-/// Returns `(response_text, quality, tokens_out)`. Quality is
-/// synthetic (oracle) even in live mode — a real integration supplies
-/// quality via `QualityFeedback` from a grader or user signal. For
-/// this eval, the canned oracle based on cluster + retry provides a
-/// fair cross-arm comparison.
+/// Returns `(response_text, quality, tokens_out)`.
+///
+/// Quality source depends on the `NOOS_JUDGE` env var (read per-call so
+/// the eval respects mid-run toggles; the grader cost only applies on
+/// real responses, not canned):
+///
+/// - unset / anything else → **synthetic oracle** (cluster × retry,
+///   deterministic — preserves the bit-reproducible canned baseline)
+/// - `anthropic` → **Claude-as-judge** (see
+///   [`regulator_common::call_anthropic_judge`]). A failed judge call
+///   (key unset, network error, unparseable output) falls back to the
+///   oracle so one flaky grade doesn't blow up a 50-query run.
+///
+/// The judge is only useful when the response text came from a real
+/// model, so canned mode intentionally skips the judge even if the env
+/// var is set — grading a canned string against itself is meaningless.
 fn llm_call(
     mode: &str,
     cluster: Cluster,
     idx: usize,
     retry: usize,
 ) -> (String, f64, u32) {
-    let quality = cluster.canned_quality(retry);
-    match mode {
+    let oracle_quality = cluster.canned_quality(retry);
+    let task = cluster.user_query(idx);
+
+    let (response, tokens_out, is_live) = match mode {
         "canned" => (
             cluster.canned_response(idx, retry),
-            quality,
             cluster.canned_tokens_out(),
+            false,
         ),
-        "ollama" => match call_ollama(&cluster.user_query(idx)) {
-            Ok((text, _ti, tokens_out, _wc)) => (text, quality, tokens_out),
+        "ollama" => match call_ollama(&task) {
+            Ok((text, _ti, tokens_out, _wc)) => (text, tokens_out, true),
             Err(_) => (
                 cluster.canned_response(idx, retry),
-                quality,
                 cluster.canned_tokens_out(),
+                false,
             ),
         },
-        "anthropic" => match call_anthropic(&cluster.user_query(idx)) {
-            Ok((text, _ti, tokens_out, _wc)) => (text, quality, tokens_out),
+        "anthropic" => match call_anthropic(&task) {
+            Ok((text, _ti, tokens_out, _wc)) => (text, tokens_out, true),
             Err(_) => (
                 cluster.canned_response(idx, retry),
-                quality,
                 cluster.canned_tokens_out(),
+                false,
             ),
         },
         _ => unreachable!("mode validated in main"),
-    }
+    };
+
+    let quality = if is_live && env::var("NOOS_JUDGE").as_deref() == Ok("anthropic") {
+        match call_anthropic_judge(&task, &response) {
+            Ok(score) => score,
+            Err(e) => {
+                eprintln!("  [judge fallback: {e}]");
+                oracle_quality
+            }
+        }
+    } else {
+        oracle_quality
+    };
+
+    (response, quality, tokens_out)
 }
 
 // ── Arm 1: Baseline (no regulator) ────────────────────────────────
@@ -628,13 +667,24 @@ fn main() {
     print_deltas(&baseline, &regulator);
     print_regulator_diagnostics(&regulator);
 
+    let judge_on = env::var("NOOS_JUDGE").as_deref() == Ok("anthropic");
     println!();
     println!("Notes:");
     println!("  • Canned mode uses a deterministic quality oracle; numbers are");
     println!("    reproducible bit-for-bit on any machine.");
-    println!("  • Live modes (ollama / anthropic) call real LLMs for response text");
-    println!("    + tokens_out, but STILL use the synthetic quality oracle. A full");
-    println!("    publication run needs a real quality grader; that's Session 24b.");
+    if judge_on && mode != "canned" {
+        println!("  • NOOS_JUDGE=anthropic was set — quality scores are from");
+        println!("    Claude-as-judge (claude-haiku-4-5 by default; override via");
+        println!("    NOOS_JUDGE_MODEL). Cost numbers are live token counts. This");
+        println!("    is the real-grader loop closure referenced in Session 28.");
+    } else if mode != "canned" {
+        println!("  • Live modes (ollama / anthropic) call real LLMs for response");
+        println!("    text + tokens_out, but use the synthetic quality oracle unless");
+        println!("    NOOS_JUDGE=anthropic is set to switch on Claude-as-judge.");
+    } else {
+        println!("  • Live modes + NOOS_JUDGE=anthropic enable Claude-as-judge");
+        println!("    grading; see the module docstring for the run command.");
+    }
     println!("  • Quality-per-1k-tokens is the fair cross-arm metric when the");
     println!("    regulator cuts retry loops short — total_quality alone wouldn't");
     println!("    weight cost saved against the quality preserved.");
