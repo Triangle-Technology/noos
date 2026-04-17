@@ -19,7 +19,7 @@ crate-type = ["cdylib"]
 # without recompiling per minor version — one wheel covers 3.9 / 3.10 /
 # 3.11 / 3.12 / 3.13 etc. Also allows building without a Python
 # interpreter present (useful for CI and source-only environments).
-pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
+pyo3 = { version = "0.28", features = ["extension-module", "abi3-py39"] }
 serde_json = "1"
 noos = { path = "../.." }
 
