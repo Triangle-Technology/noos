@@ -470,57 +470,58 @@ fn llm_call(
     (response, quality, tokens_out)
 }
 
-// ── Arm 1: Baseline (no regulator) ────────────────────────────────
-
-fn run_baseline(stream: &[(Cluster, usize)], mode: &str, cp: &mut Checkpoint) -> RunMetrics {
-    let mut m = RunMetrics {
+// ── Interleaved arms (S36 v5 post-mortem fix) ─────────────────────
+//
+// Pre-v5 design ran `run_baseline` for ALL 50 queries, then
+// `run_regulator` for ALL 50. On live Ollama this means baseline
+// hit phi3 for ~4.5h (queries 0-50), then regulator hit a DEGRADED
+// phi3 for another ~4.5h. Result: v4 (2026-04-18) regulator mean_q =
+// 0.000 while baseline mean_q = 0.318 on the same model. Same prompts,
+// same model, 4.5h apart → phi3 state drift contaminated the
+// comparison.
+//
+// v5 interleaves per query: baseline and regulator both run on each
+// (cluster, idx) back-to-back before advancing to the next. Any phi3
+// state drift now affects both arms symmetrically. Canned mode is
+// deterministic so arm order doesn't change its numbers — CI
+// reproducibility guard (+4680, +0.90, +0.85) still passes.
+fn run_interleaved(
+    stream: &[(Cluster, usize)],
+    mode: &str,
+    cp: &mut Checkpoint,
+) -> (RunMetrics, RunMetrics) {
+    let mut baseline_m = RunMetrics {
         label: "baseline",
         ..Default::default()
     };
-    // Restore prior progress if resuming
-    cp.baseline.apply_to(&mut m);
-    let start_idx = m.queries_served;
-    if start_idx > 0 {
-        eprintln!("[checkpoint] resuming baseline from query {start_idx}/{}", stream.len());
-    }
-
-    for &(cluster, idx) in &stream[start_idx..] {
-        let outcome = run_retry_loop(mode, cluster, idx, &mut m, None);
-        m.queries_served += 1;
-        m.total_attempts += outcome.attempts;
-        m.total_quality += outcome.final_quality;
-
-        // Save after every completed query
-        cp.baseline = CheckpointArm::snapshot(&m);
-        save_checkpoint(cp);
-    }
-
-    cp.baseline_done = true;
-    save_checkpoint(cp);
-    m
-}
-
-// ── Arm 2: Regulator-enabled ──────────────────────────────────────
-
-fn run_regulator(stream: &[(Cluster, usize)], mode: &str, cp: &mut Checkpoint) -> RunMetrics {
-    let mut m = RunMetrics {
+    let mut regulator_m = RunMetrics {
         label: "regulator",
         ..Default::default()
     };
-    // Restore prior progress if resuming
-    cp.regulator.apply_to(&mut m);
-    let start_idx = m.queries_served;
 
-    let mut regulator = if start_idx > 0 {
+    // Restore prior progress if resuming. Both arms advance in
+    // lockstep in the interleaved design, so we expect
+    // baseline.queries_served == regulator.queries_served.
+    cp.baseline.apply_to(&mut baseline_m);
+    cp.regulator.apply_to(&mut regulator_m);
+    let start_idx = baseline_m.queries_served.min(regulator_m.queries_served);
+
+    if start_idx > 0 {
         eprintln!(
-            "[checkpoint] resuming regulator from query {start_idx}/{}",
+            "[checkpoint] resuming interleaved run from query {start_idx}/{}",
             stream.len()
         );
+    }
+
+    // Rehydrate regulator from checkpoint JSON or start fresh.
+    let mut regulator = if start_idx > 0 {
         match cp.regulator_state_json.as_deref() {
             Some(json) => match serde_json::from_str::<RegulatorState>(json) {
                 Ok(state) => Regulator::import(state).with_cost_cap(COST_CAP),
                 Err(e) => {
-                    eprintln!("[checkpoint] regulator state deserialize failed: {e}; fresh restart");
+                    eprintln!(
+                        "[checkpoint] regulator state deserialize failed: {e}; fresh restart"
+                    );
                     Regulator::for_user("eval_user").with_cost_cap(COST_CAP)
                 }
             },
@@ -531,11 +532,16 @@ fn run_regulator(stream: &[(Cluster, usize)], mode: &str, cp: &mut Checkpoint) -
     };
 
     for &(cluster, idx) in &stream[start_idx..] {
-        // Per-query reset via export/import roundtrip. Preserves
-        // LearnedState + CorrectionPattern (durable); clears
-        // CostAccumulator + ScopeTracker + TokenStatsAccumulator +
-        // pending_response (per-task). `with_cost_cap` re-applies the
-        // cap because `import` rehydrates with `DEFAULT_TOKEN_CAP`.
+        // 1) Baseline arm for this query (no regulator events).
+        let outcome_b = run_retry_loop(mode, cluster, idx, &mut baseline_m, None);
+        baseline_m.queries_served += 1;
+        baseline_m.total_attempts += outcome_b.attempts;
+        baseline_m.total_quality += outcome_b.final_quality;
+
+        // 2) Regulator arm for the SAME query. Per-query reset via
+        // export/import preserves LearnedState + CorrectionPattern
+        // (durable) while clearing CostAccumulator / ScopeTracker /
+        // TokenStatsAccumulator (per-task).
         let snapshot = regulator.export();
         regulator = Regulator::import(snapshot).with_cost_cap(COST_CAP);
 
@@ -543,31 +549,24 @@ fn run_regulator(stream: &[(Cluster, usize)], mode: &str, cp: &mut Checkpoint) -
             user_message: cluster.user_query(idx),
         });
 
-        // Pre-generation probe: `ProceduralWarning` fires ONLY when
-        // `TurnComplete` hasn't populated scope-tracker response
-        // keywords yet (Session 23 design). Record the warning here.
         if matches!(regulator.decide(), Decision::ProceduralWarning { .. }) {
-            m.procedural_warnings += 1;
+            regulator_m.procedural_warnings += 1;
         }
 
-        let outcome = run_retry_loop(mode, cluster, idx, &mut m, Some(&mut regulator));
+        let outcome_r = run_retry_loop(mode, cluster, idx, &mut regulator_m, Some(&mut regulator));
 
-        if outcome.circuit_broken {
-            m.queries_circuit_broken += 1;
+        if outcome_r.circuit_broken {
+            regulator_m.queries_circuit_broken += 1;
         }
 
-        // Post-delivery probe: `ScopeDriftWarn` fires on the DELIVERED
-        // response. Separate `decide()` call from the pre-generation
-        // probe above.
         if matches!(regulator.decide(), Decision::ScopeDriftWarn { .. }) {
-            m.scope_drift_flags += 1;
+            regulator_m.scope_drift_flags += 1;
         }
 
-        m.queries_served += 1;
-        m.total_attempts += outcome.attempts;
-        m.total_quality += outcome.final_quality;
+        regulator_m.queries_served += 1;
+        regulator_m.total_attempts += outcome_r.attempts;
+        regulator_m.total_quality += outcome_r.final_quality;
 
-        // Follow-up correction (Debug cluster only).
         if cluster.produces_correction() {
             regulator.on_event(LLMEvent::UserCorrection {
                 correction_message: cluster.correction_text(idx),
@@ -575,13 +574,17 @@ fn run_regulator(stream: &[(Cluster, usize)], mode: &str, cp: &mut Checkpoint) -
             });
         }
 
-        // Save checkpoint after every completed query so a mid-run
-        // freeze only costs the CURRENT query's work on resume.
-        cp.regulator = CheckpointArm::snapshot(&m);
+        // Save checkpoint after BOTH arms complete this query. Any
+        // crash mid-query loses at most one (baseline, regulator) pair.
+        cp.baseline = CheckpointArm::snapshot(&baseline_m);
+        cp.regulator = CheckpointArm::snapshot(&regulator_m);
         cp.regulator_state_json = serde_json::to_string(&regulator.export()).ok();
         save_checkpoint(cp);
     }
-    m
+
+    cp.baseline_done = true;
+    save_checkpoint(cp);
+    (baseline_m, regulator_m)
 }
 
 // ── Shared retry loop ─────────────────────────────────────────────
@@ -822,8 +825,7 @@ fn main() {
     print_header(&mode, stream.len());
 
     let t0 = Instant::now();
-    let baseline = run_baseline(&stream, &mode, &mut checkpoint);
-    let regulator = run_regulator(&stream, &mode, &mut checkpoint);
+    let (baseline, regulator) = run_interleaved(&stream, &mode, &mut checkpoint);
     let wallclock_s = t0.elapsed().as_secs_f64();
 
     // Successful completion — remove checkpoint so next run starts fresh.
