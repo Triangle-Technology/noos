@@ -390,9 +390,9 @@ if (d.kind === 'circuit_break') console.log(d.suggestion)
 TypeScript `.d.ts` auto-generated from the Rust source. See
 [`bindings/node/README.md`](bindings/node/README.md).
 
-## Status (2026-04-17, crate `noos 0.3.0` on crates.io)
+## Status (2026-04-18, crate `noos 0.4.0` on crates.io)
 
-Path 2 MVP + two feature expansions shipped:
+Path 2 MVP + three feature expansions shipped:
 
 - **0.2.0** rebranded crate name and Rust types from `Nous*` to `Noos*`
   (crates.io name was taken).
@@ -409,6 +409,19 @@ Path 2 MVP + two feature expansions shipped:
   `CircuitBreakReason::RepeatedToolCallLoop`, new per-turn tool-stats
   accessors, and a fourth flagship demo. Catches the retry-loop failure
   mode that transport-retry crates and `max_iterations` don't.
+- **0.4.0** — OTel GenAI ingestion adapter
+  (`regulator::otel::events_from_span`), implicit-correction detector
+  (`Regulator::with_implicit_correction_window`) that fires on
+  temporal-proximity + topic-continuity retries without requiring
+  explicit `UserCorrection` events, `metrics_snapshot()` one-call
+  observability dump for Prometheus / Datadog / StatsD, migration
+  guide (`docs/migrating.md`) with 4 recipes replacing LangChain /
+  Mem0 / tenacity / Langfuse wiring, and an honest eval posture
+  replacing the synthetic-oracle headline numbers with real-LLM +
+  real-judge data (quality parity, model-dependent cost direction).
+  Internal: interleaved-arm eval methodology + crash-safe checkpoint,
+  criterion benchmarks (30µs/turn overhead), TLS fix in examples,
+  11 adversarial tests pinning scope/tool-loop limitations.
 
 442 tests passing, zero clippy warnings, zero rustdoc warnings.
 
