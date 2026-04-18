@@ -181,63 +181,90 @@ cargo run --example regulator_scope_drift_demo
 
 ## Eval numbers
 
-50-query mixed-cluster workload, regulator-enabled arm vs naive-retry
-baseline.
+Tier 2.2 benchmark: mixed-cluster workload (FactQA / Debug / Refactor / Ambiguous),
+regulator-enabled arm vs naive-retry baseline. **Honest reporting** — we
+distinguish canned (synthetic-oracle) reproducibility numbers from
+real-LLM + real-judge data points.
 
-### Canned (synthetic quality oracle, reproducible bit-for-bit)
+### Real-LLM + real-judge results
+
+The only fair-comparison metric is: real model generating responses,
+real grader scoring them, both arms running against the same model
+state. Two datasets, both with `NOOS_JUDGE=anthropic` replacing the
+synthetic oracle with Claude Haiku:
+
+**Ollama phi3:mini + Haiku judge, interleaved arms (N=29 fair pairs)**
 
 |                        | baseline | regulator |   Δ  |
 |------------------------|---------:|----------:|-----:|
-| total cost (tokens_out)|   16 040 |    11 360 | **−29.2 %** |
-| total quality          |    29.90 |     30.80 | **+0.90** |
-| quality per 1k tokens  |     1.86 |      2.71 | **+0.85 (+46 %)** |
+| total cost (tokens_out)|   25 494 |    24 118 | **−5.4 %** |
+| mean quality           |    0.510 |     0.484 | −0.026 (noise) |
+| queries circuit-broken |        0 |         3 | — |
+| attempts               |       48 |        37 | **−23 %** |
+
+**Anthropic claude-haiku-4-5 generator + Haiku judge (N=50)**
+
+|                        | baseline | regulator |   Δ  |
+|------------------------|---------:|----------:|-----:|
+| total cost (tokens_out)|    9 100 |    10 157 | +11.6 % (regulator more expensive) |
+| mean quality           |    0.570 |     0.618 | +0.048 (noise) |
+| queries circuit-broken |        0 |         0 | — |
+| attempts               |       58 |        64 | +10 % |
+
+**Reading**: Quality deltas (|Δ| ≤ 0.05) sit inside the noise bar for
+these sample sizes (SE(Δmean) ≈ 0.04–0.05). **No detectable quality
+regression from adding the regulator** on either model. Cost direction
+is model-dependent — phi3 over-generates on CPU and the regulator's
+`CircuitBreak` cuts real excess; Haiku is already concise so the
+regulator's overhead is slightly net-negative.
+
+```bash
+# Real Ollama + Haiku judge (requires local Ollama + ANTHROPIC_API_KEY)
+NOOS_JUDGE=anthropic \
+  cargo run --release --example task_eval_real_llm_regulator -- ollama
+
+# Real Anthropic + Haiku judge (requires ANTHROPIC_API_KEY only)
+NOOS_JUDGE=anthropic \
+  cargo run --release --example task_eval_real_llm_regulator -- anthropic
+```
+
+### Canned (synthetic oracle, reproducibility guard only)
+
+Used by CI to catch regressions in the harness itself. **These numbers
+do NOT transfer to real LLMs** — the oracle's per-retry quality decline
+triggers `QualityDeclineNoRecovery` in a way real graders don't:
+
+|                        | baseline | regulator |   Δ  |
+|------------------------|---------:|----------:|-----:|
+| total cost (tokens_out)|   16 040 |    11 360 | −29.2 % |
+| mean quality           |    0.598 |     0.616 | +0.018 |
 | queries circuit-broken |        0 |         9 | — |
-| scope drift flagged    |        — |        41 | — |
 
 ```bash
 cargo run --release --example task_eval_real_llm_regulator
 ```
 
-### Live (phi3:mini via Ollama, 4h41m wallclock)
+The +46 % quality-per-1k claim that historically appeared in this table
+is a scoring artifact of `Cluster::canned_quality(retry)`, not a signal
+on real workloads. It's preserved as a bit-for-bit CI guard so changes
+to the harness surface explicitly.
 
-Same 50-query stream, real LLM for response text + token counts, same
-synthetic quality oracle for scoring. A newer `NOOS_JUDGE=anthropic`
-mode replaces the oracle with Claude-as-judge — see the Caveat below.
+### What the regulator provides on real workloads
 
-|                        | baseline | regulator |   Δ  |
-|------------------------|---------:|----------:|-----:|
-| total cost (tokens_out)|   64 436 |    12 552 | **−80.5 %** |
-| total quality          |    29.90 |     30.80 | **+0.90** |
-| quality per 1k tokens  |     0.46 |      2.45 | **+1.99 (+433 %)** |
-| queries circuit-broken |        0 |         9 | — |
-| scope drift flagged    |        — |        41 | — |
+- **Quality parity** — no detectable regression from adding the wrapper
+- **Scope-drift warnings** on majority of turns (real LLMs drift more
+  than canned responses)
+- **Circuit-break halts** on Ambiguous-cluster retry loops when the
+  model exhibits `QualityDeclineNoRecovery` — real on phi3 over 5+
+  retries, rarer on Haiku
+- **Procedural-memory surfacing** once `MIN_CORRECTIONS_FOR_PATTERN=3`
+  threshold trips (see `regulator_correction_memory_demo`)
+- **Cost-cap circuit-breaks** (not triggered in this eval — cap sized
+  above typical query cost)
 
-```bash
-cargo run --release --example task_eval_real_llm_regulator -- ollama
-```
-
-Why the live cost gap widens: a real small model over-generates on
-uncontrolled retries (baseline burns 4× the canned estimate), while
-the regulator halts retry loops on `QualityDeclineNoRecovery` so cost
-stays near the canned bound. The quality-per-1k-tokens ratio is the
-fair cross-arm metric when the regulator cuts retries short —
-`total_quality` alone under-credits the cost saved.
-
-**Caveat**: the two tables above use a synthetic quality oracle.
-Live-LLM cost is real, quality is not. The harness gained a real-judge
-mode in 0.3.1-dev — set `NOOS_JUDGE=anthropic` and the oracle is
-replaced by Claude-as-judge (`claude-haiku-4-5` by default; override
-via `NOOS_JUDGE_MODEL`):
-
-```bash
-NOOS_JUDGE=anthropic \
-  cargo run --release --example task_eval_real_llm_regulator -- ollama
-NOOS_JUDGE=anthropic \
-  cargo run --release --example task_eval_real_llm_regulator -- anthropic
-```
-
-Falls back to the oracle on per-call grader failures so one flaky grade
-doesn't invalidate a 50-query run.
+The regulator is infrastructure, not a quality booster. Eval confirms
+it doesn't cost you measurable quality; the other value props are
+qualitative surfacings that the baseline simply lacks.
 
 ## Observability
 
@@ -396,12 +423,13 @@ Path 2 MVP + two feature expansions shipped:
   on emotional text, 3 runs bit-identical). Not exercised by `Regulator`;
   see [Advanced: direct cognitive-session access](#advanced-direct-cognitive-session-access).
 
-### Shipped infrastructure, canned-eval numbers
+### Shipped infrastructure with honest eval posture
 
 - `Regulator` + four flagship demos + 50-query eval harness.
-  Live-LLM numbers (Ollama `phi3:mini`, 4h41m wallclock) confirm the
-  canned story: **−80.5 % cost, +433 % quality-per-1k** on the
-  regulator arm.
+  Real-LLM + real-judge evals (see [Eval numbers](#eval-numbers))
+  show quality parity with baseline (|Δ| ≤ 0.05 at N=29 and N=50, within
+  noise). Canned oracle numbers are preserved as CI regression guards
+  only, not as product claims.
 
 ### Measured limitations
 

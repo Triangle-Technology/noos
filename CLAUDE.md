@@ -525,9 +525,9 @@ cargo run --example regulator_correction_memory_demo -- anthropic  # Demo 3 live
 cargo run --example regulator_implicit_correction_demo      # Demo 5 (Session 32) — ProceduralWarning from implicit retries, no explicit UserCorrection needed
 
 # Path 2 real-LLM reliability eval (Tier 2.2, Session 24)
-cargo run --example task_eval_real_llm_regulator            # 50-query mixed-cluster eval, canned (baseline +0.85 q/1k, cost -29.2%)
-cargo run --example task_eval_real_llm_regulator -- ollama  # Live via Ollama (per-query latency × 50 = long run)
-cargo run --example task_eval_real_llm_regulator -- anthropic # Live via Anthropic (requires ANTHROPIC_API_KEY)
+cargo run --example task_eval_real_llm_regulator            # 50-query canned (CI reproducibility guard only: +29.2% cost, +0.85 q/1k — synthetic oracle artifact, NOT real-workload claim)
+cargo run --example task_eval_real_llm_regulator -- ollama  # Live via Ollama phi3:mini (add NOOS_JUDGE=anthropic for real grading; S36 N=29 interleaved: Δmean_q=−0.026, Δcost=−5.4%)
+cargo run --example task_eval_real_llm_regulator -- anthropic # Live via Anthropic Haiku (add NOOS_JUDGE=anthropic for real grading; S36 N=50: Δmean_q=+0.048, Δcost=+11.6%)
 ```
 
 ## Recent sessions
