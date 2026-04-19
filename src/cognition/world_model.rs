@@ -91,6 +91,38 @@ const VOLATILITY_BOOST_THRESHOLD: f64 = 0.5;
 /// PE volatility threshold for "stable" environment.
 const VOLATILITY_DAMPEN_THRESHOLD: f64 = 0.2;
 
+// ── Allostatic body-budget rates (Barrett 2017, Sterling 2012) ───────────
+//
+// These control the per-turn dynamics of `body_budget`. Each rate is
+// small (<= 0.05) so body_budget changes are gradual — a single event
+// shouldn't crash or replenish it fully. Calibrated against the eval
+// suite's 30-turn depletion trajectory: sustained high-arousal +
+// high-PE conversation drops budget by ~40% over 30 turns (roughly
+// matches the Tier 1.2 conservation-eval curve).
+
+/// Depletion per unit of `sensory_pe` per `perceive` call.
+/// PE is the metabolically-costly signal (surprise = extra compute);
+/// weighted 2x arousal depletion.
+const PE_DEPLETION_RATE: f64 = 0.02;
+
+/// Depletion per unit of `arousal` per `perceive` call.
+/// Arousal is the stress-response signal; slower bleed than PE.
+const AROUSAL_DEPLETION_RATE: f64 = 0.01;
+
+/// Natural per-turn replenishment regardless of outcome — slow drift
+/// back toward full budget during calm conversation.
+const NATURAL_REPLENISHMENT_RATE: f64 = 0.005;
+
+/// Replenishment rate on positive response RPE (reward outperformed
+/// expectation). Higher than depletion because good outcomes should
+/// recover faster than stress depletes.
+const POSITIVE_RPE_REPLENISHMENT_RATE: f64 = 0.05;
+
+/// Depletion rate on negative response RPE (reward underperformed).
+/// Gentler than the positive rate — dopaminergic learning tolerates
+/// mild disappointment without full stress response (Schultz 1997).
+const NEGATIVE_RPE_DEPLETION_RATE: f64 = 0.02;
+
 /// Compute volatility-modulated learning rate (Behrens 2007).
 ///
 /// Base rate × volatility multiplier:
@@ -152,10 +184,13 @@ pub fn perceive(model: &WorldModel, message: &str) -> WorldModel {
     // 6. Update body budget (Principle 4+8: allostatic tracking)
     // High sensory PE depletes budget (unexpected = metabolically costly).
     // High arousal depletes budget (stress response consumes resources).
-    let depletion = updated.sensory_pe * 0.02 + updated.belief.affect.arousal * 0.01;
-    // Natural replenishment (slow recovery toward baseline).
-    let replenishment = 0.005;
-    updated.body_budget = clamp(updated.body_budget - depletion + replenishment, 0.0, 1.0);
+    let depletion = updated.sensory_pe * PE_DEPLETION_RATE
+        + updated.belief.affect.arousal * AROUSAL_DEPLETION_RATE;
+    updated.body_budget = clamp(
+        updated.body_budget - depletion + NATURAL_REPLENISHMENT_RATE,
+        0.0,
+        1.0,
+    );
 
     // 7. Strategy recommendation from learned state (Principle 5: classification emerges).
     // After perceiving the message, recommend a strategy for the response
@@ -214,9 +249,17 @@ pub fn consolidate(
 
     // 5. Body budget replenishment from positive RPE (Principle 8: allostasis)
     if updated.response_rpe > 0.0 {
-        updated.body_budget = clamp(updated.body_budget + updated.response_rpe * 0.05, 0.0, 1.0);
+        updated.body_budget = clamp(
+            updated.body_budget + updated.response_rpe * POSITIVE_RPE_REPLENISHMENT_RATE,
+            0.0,
+            1.0,
+        );
     } else {
-        updated.body_budget = clamp(updated.body_budget + updated.response_rpe * 0.02, 0.0, 1.0);
+        updated.body_budget = clamp(
+            updated.body_budget + updated.response_rpe * NEGATIVE_RPE_DEPLETION_RATE,
+            0.0,
+            1.0,
+        );
     }
 
     // 6. Strategy detection + learning (Principle 7: multi-timescale learning).

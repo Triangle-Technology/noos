@@ -32,6 +32,39 @@ const MAX_RECENT_MESSAGES: usize = 10;
 /// that sustained high-cost operations meaningfully accumulate depletion.
 const COST_DEPLETION_RATE: f64 = 0.02;
 
+// ── Gate feedback EMA (inject_gate_feedback) ─────────────────────────────
+//
+// Per-token feedback from the cognitive gate into affect + sensory PE.
+// Values below are EMA blend weights — chosen so a single salient token
+// bumps the state by ~20%, while sustained salience drives the state
+// toward the gate's own signal over ~4 tokens. Matches the gamma-cycle
+// thalamocortical latency from the convergence-loop derivation (Lamme 2000).
+
+/// Gate activation threshold. Below this, gate is considered passive and
+/// arousal decays toward baseline. Above, gate is actively modulating and
+/// arousal EMA-blends toward the gate signal.
+const GATE_ACTIVE_MIN_ALPHA: f64 = 0.1;
+
+/// Prior weight on arousal during active EMA blend. `0.8` means each
+/// token advances the arousal ~20% toward the gate's alpha — 4 tokens
+/// to saturate.
+const GATE_AROUSAL_PRIOR_WEIGHT: f64 = 0.8;
+
+/// Decay factor applied per token when the gate is passive. `0.95` gives
+/// a ~14-token half-life — enough to remember recent salience without
+/// locking arousal high after a single burst.
+const GATE_PASSIVE_DECAY: f64 = 0.95;
+
+/// Minimum `|delta_gain - 1.0|` before it counts as a gate-surprise
+/// signal. Small deviations from unit gain are treated as noise.
+const GATE_SURPRISE_MIN_DELTA: f64 = 0.05;
+
+/// Prior weight on sensory_pe during gate-surprise EMA blend. `0.7`
+/// advances PE ~30% per token — faster than arousal because PE is a
+/// more transient signal (surprise should decay quickly after the
+/// triggering token).
+const GATE_PE_PRIOR_WEIGHT: f64 = 0.7;
+
 /// High-level cognitive session — the application-facing API.
 ///
 /// Manages all internal cognitive state. Applications call:
@@ -113,7 +146,7 @@ impl CognitiveSession {
     }
 
     /// Mutable: runs full cognitive pipeline on user message.
-    /// Updates WorldModel, PrefrontalState, history.
+    /// Updates WorldModel, LocusCoeruleus, history.
     /// Requires mutation because cognitive state accumulates across turns
     /// (body budget, gain mode, topic context, learned strategies).
     ///
@@ -257,20 +290,21 @@ impl CognitiveSession {
     pub fn inject_gate_feedback(&mut self, gate_alpha: f64, gate_delta_gain: f64) {
         // Gate alpha → arousal: high alpha = gate actively modulating = salient input.
         // EMA blend so arousal accumulates across tokens, not jumps.
-        if gate_alpha > 0.1 {
-            self.model.belief.affect.arousal =
-                self.model.belief.affect.arousal * 0.8 + gate_alpha * 0.2;
+        if gate_alpha > GATE_ACTIVE_MIN_ALPHA {
+            self.model.belief.affect.arousal = self.model.belief.affect.arousal
+                * GATE_AROUSAL_PRIOR_WEIGHT
+                + gate_alpha * (1.0 - GATE_AROUSAL_PRIOR_WEIGHT);
         } else {
             // Gate passive (alpha ≈ 0) — decay arousal toward baseline.
-            self.model.belief.affect.arousal *= 0.95;
+            self.model.belief.affect.arousal *= GATE_PASSIVE_DECAY;
         }
 
         // Gate delta_gain → sensory PE proxy: deviation from 1.0 = surprise.
         // |gain - 1.0| measures how much the gate wants to change processing.
         let gate_surprise = (gate_delta_gain - 1.0).abs();
-        if gate_surprise > 0.05 {
-            self.model.sensory_pe =
-                self.model.sensory_pe * 0.7 + gate_surprise * 0.3;
+        if gate_surprise > GATE_SURPRISE_MIN_DELTA {
+            self.model.sensory_pe = self.model.sensory_pe * GATE_PE_PRIOR_WEIGHT
+                + gate_surprise * (1.0 - GATE_PE_PRIOR_WEIGHT);
         }
 
         // Arousal-based gain trigger (same as convergence loop — Aston-Jones 2005).

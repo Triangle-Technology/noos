@@ -61,7 +61,7 @@ pub struct CognitiveState {
     /// Sustained arousal modulator (Yerkes-Dodson). Penalizes prolonged high arousal.
     pub sustained_arousal: f64,
 
-    // --- From PrefrontalState ---
+    // --- From LocusCoeruleus ---
     /// LC-NE gain mode (Aston-Jones & Cohen 2005).
     /// Phasic = focused exploitation, Tonic = broad exploration.
     pub gain_mode: GainMode,
