@@ -7,6 +7,45 @@ on the same two wedges (tool-loop halt + procedural correction memory)
 so copy-readers see a consistent story no matter which channel they
 land on.
 
+## Status: postponed (as of 2026-04-19)
+
+Drafts are complete and packages are published, but **broad outreach is
+deferred** pending pre-outreach readiness. The social accounts available
+are all brand-new (0 HN karma, 0 Reddit karma, 0 X followers); posting
+into an anti-spam-gated ecosystem with a fresh account is expected to
+produce single-digit views and no pilot conversions. Reputation burn
+risk > marginal reach gain at this stage.
+
+Re-evaluate + post when at least two of the following hold:
+
+1. **1-3 pilot users** have installed `noos-langchain` and given feedback
+   on its fit for a real workload (not just synthetic benchmarks).
+2. **1 case study** with real token-savings or quality numbers from a
+   deployed agent (not the $47k incident citation — our own number).
+3. **Organic signal** — any non-creator GitHub star, PyPI download spike,
+   or unsolicited mention.
+4. **Point release** addressing a real user-reported issue (signals we're
+   responsive + product is evolving from feedback, not vacuum).
+
+Interim alternatives that don't require reputation:
+
+- **Direct outreach via LinkedIn / cold email** to engineers at orgs
+  using LangChain (0 account-age gate, 10-20 targeted asks beat 1 HN
+  post that no one sees).
+- **Technical blog post on Dev.to or own domain** → submit as external
+  link to HN. Google-indexed, organic discoverability, no
+  account-reputation gate.
+- **PR into awesome-lists** (`awesome-llm-apps`, `awesome-langchain`,
+  etc.) — merge = distribution.
+- **Comment on related GitHub issues / discussions** in LangChain /
+  LangGraph / CrewAI repos when reliability topics come up, with
+  substantive contributions (not pitches).
+- **Build HN / Reddit karma** by commenting helpfully on 5-10 adjacent
+  stories over 1-2 weeks. Future posts then get better algorithm weight.
+
+Drafts below stay ready; update the "Status as of..." block at next
+re-evaluation.
+
 ## Status as of 2026-04-19
 
 All three packages live:
