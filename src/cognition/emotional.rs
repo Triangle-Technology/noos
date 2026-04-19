@@ -72,6 +72,24 @@
 //!   (the -1.86% finding is English-specific, not universal).
 //!
 //! All functions are pure (<1ms, $0 LLM cost).
+//!
+//! ## Gating (P10)
+//!
+//! Scalar producer (`compute_arousal`) consumed by every downstream
+//! signal. Not a competing decision itself — priority competition
+//! happens in `adaptive_thresholds` where arousal narrows/expands
+//! thresholds.
+//!
+//! - **Fires when**: called from [`belief_state::update_affect`](super::belief_state::update_affect)
+//!   on every `perceive()` call.
+//! - **Inactive when**: never — empty or non-English prose returns a
+//!   zero/near-zero arousal, but the function still runs.
+//! - **Suppresses**: nothing directly. High arousal flowing into
+//!   [`adaptive_thresholds`](super::adaptive_thresholds) is what
+//!   narrows breadth-oriented thresholds (LeDoux 1996 amygdala low-road
+//!   dominance — see §P10 SIGNALS v2 example).
+//! - **Suppressed by**: nothing upstream. No gate skips arousal
+//!   computation for a given message.
 
 use regex::Regex;
 use std::sync::LazyLock;

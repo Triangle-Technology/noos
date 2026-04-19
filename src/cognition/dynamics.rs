@@ -15,6 +15,24 @@
 //! not semantic content).
 //!
 //! Pure functions, <1ms, $0 LLM cost.
+//!
+//! ## Gating (P10)
+//!
+//! Regime classifier, not a competing signal. Output
+//! ([`DynamicsState`]) is read by downstream gating consumers
+//! (`adaptive_thresholds`, `resource_allocator`) as a modulation input;
+//! priority competition happens there.
+//!
+//! - **Fires when**: [`detect_regime`] is called once per
+//!   [`converge`](super::convergence::converge) step.
+//! - **Inactive when**: accumulated PE is below
+//!   [`REGIME_REASSESS_PE_THRESHOLD`] — the existing regime persists
+//!   rather than being recomputed (Murray 2014 slow-timescale
+//!   integration; sparse-update prior from DPC 2024 / THICK ICLR 2024).
+//! - **Suppresses**: nothing directly. Regime IS an input to gating
+//!   decisions but does not itself suppress another signal.
+//! - **Suppressed by**: nothing. No upstream module can veto regime
+//!   classification on a given turn.
 
 use crate::types::world::{ConversationRegime, DynamicsState, WorldModel};
 

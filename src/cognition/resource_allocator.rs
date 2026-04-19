@@ -29,6 +29,27 @@
 //! (arousal × complexity inverted-U).
 //!
 //! Pure functions, <1ms, $0 LLM cost.
+//!
+//! ## Gating (P10)
+//!
+//! Application-infrastructure allocator, not a cognitive signal
+//! producer. Output ([`AllocationResult`]) is a budget vector consumed
+//! by the host application's retrieval subsystems; it does not enter
+//! the convergence-loop priority chain.
+//!
+//! - **Fires when**: [`allocate_context_budget`] is called by the host
+//!   application for a retrieval decision. [`compute_resource_pressure`]
+//!   is called from [`convergence`](super::convergence) to drive
+//!   downstream arousal modulation.
+//! - **Inactive when**: caller passes `None` context — allocator
+//!   returns `None` and the application falls back to fixed defaults
+//!   (P5 fail-open).
+//! - **Suppresses**: nothing. Allocation vectors do not dominate peer
+//!   signals.
+//! - **Suppressed by**: [`adaptive_thresholds`](super::adaptive_thresholds)
+//!   indirectly — arousal and gain-mode modulation of budget shares
+//!   flow through the threshold layer before reaching the allocator
+//!   (single-source-of-gating rule).
 
 use crate::math::{clamp, softmax};
 use crate::types::gate::{GateResult, GateType};

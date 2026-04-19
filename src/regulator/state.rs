@@ -1,5 +1,14 @@
 //! Regulator persistence envelope.
 //!
+//! **Scope note (P1 / P9b)**: pure data-shape module, not cognitive.
+//! Everything here is `#[derive(Serialize, Deserialize)]` on fields
+//! that already exist in [`LearnedState`] (Path 1) or
+//! [`CorrectionPattern`] (Path 2 structural patterns) — no new signal
+//! computation happens at this layer.
+//! Snapshot / restore only. P1 applies to the wrapped
+//! [`CognitiveSession`](crate::session::CognitiveSession) that owns
+//! `LearnedState`; P9b is satisfied by construction.
+//!
 //! Session 20 split `RegulatorState` out of `regulator::mod` into its
 //! own module so the persistence surface grows independently of the
 //! dispatch surface. Older snapshots round-trip cleanly because every

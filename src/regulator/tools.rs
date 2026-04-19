@@ -1,5 +1,14 @@
 //! Tool-call observation channel (Path A, 0.3.0).
 //!
+//! **Scope note (P1 / P9b)**: I/O adapter sub-module, not cognitive.
+//! Everything here is sequence tracking over opaque tool-name strings
+//! — no sentiment lexicon, no topic inference, no text content
+//! analysis. Tool names are treated as identifiers chosen by the host
+//! application (`get_weather`, `search_kb`); the detector only cares
+//! whether consecutive calls repeat. P1 applies to the wrapped
+//! [`CognitiveSession`](crate::session::CognitiveSession); P9b is
+//! satisfied by construction.
+//!
 //! Modern LLM agents make tool calls (function calls, API calls,
 //! retrieval). Without visibility into these, the regulator cannot
 //! detect a very common failure mode: the agent calls the same tool

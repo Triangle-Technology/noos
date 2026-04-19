@@ -19,6 +19,22 @@
 //!   strategy EMA store (dorsomedial striatum analog, Daw 2005).
 //!
 //! Pure functions, <1ms, $0 LLM cost.
+//!
+//! ## Gating (P10)
+//!
+//! State-update utility, not a signal producer with priority competition.
+//! `update_affect` and `update_predictions` are invoked unconditionally
+//! from [`world_model::perceive`](super::world_model::perceive) on every
+//! turn — no upstream rule would skip them.
+//!
+//! - **Fires when**: always, once per `perceive()` call.
+//! - **Inactive when**: never — empty messages still produce a (zero)
+//!   arousal update and an (empty) topic cluster hash.
+//! - **Suppresses**: nothing. Outputs feed the shared
+//!   [`WorldModel`](crate::types::world::WorldModel) state; priority
+//!   competition happens in downstream signal producers.
+//! - **Suppressed by**: nothing. No upstream gate skips affect or
+//!   prediction updates.
 
 use crate::cognition::detector::extract_topics;
 use crate::cognition::emotional::compute_arousal;

@@ -13,6 +13,25 @@
 //! - Sterling 2012 (allostatic regulation → presence penalty under load)
 //!
 //! Pure functions, <1ms, $0 LLM cost.
+//!
+//! ## Gating (P10)
+//!
+//! Tầng 1 sampling adapter: converts settled
+//! [`CognitiveState`] into a [`SamplingOverride`]. Not a signal
+//! producer — a consumer that reads adaptive thresholds (the single
+//! source of gating per §P10) and emits sampling knobs.
+//!
+//! - **Fires when**: [`compute_sampling_override`] is called once per
+//!   turn after the convergence loop settles.
+//! - **Inactive when**: cognitive signals are at neutral defaults —
+//!   per-threshold guards (e.g. `arousal >= threshold_arousal_intervention`)
+//!   individually return `None` and every field of the returned
+//!   [`SamplingOverride`] stays `None`.
+//! - **Suppresses**: nothing — sampling overrides compose, they do not
+//!   replace peer signals.
+//! - **Suppressed by**: [`adaptive_thresholds`](super::adaptive_thresholds)
+//!   refusing to cross a per-signal intervention threshold. Gating is
+//!   delegated upstream (P10 single source of gating rule).
 
 use crate::cognition::adaptive_thresholds::{
     get_adaptive_threshold, threshold_arousal_intervention, threshold_body_budget_conservation,

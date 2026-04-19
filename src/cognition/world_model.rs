@@ -23,6 +23,27 @@
 //! the model.
 //!
 //! Pure functions, <1ms, $0 LLM cost.
+//!
+//! ## Gating (P10)
+//!
+//! State maintenance, not a signal producer with priority competition.
+//! `perceive` / `consolidate` / `maintain` are the three phase hooks of
+//! the allostatic loop and each is invoked unconditionally at its phase
+//! boundary — there is no priority rule that would skip them.
+//!
+//! - **Fires when**: [`perceive`] runs once per
+//!   [`CognitiveSession::process_message`](crate::session::CognitiveSession::process_message);
+//!   [`consolidate`] runs once per
+//!   [`CognitiveSession::process_response`](crate::session::CognitiveSession::process_response);
+//!   [`maintain`] runs once per
+//!   [`CognitiveSession::idle_cycle`](crate::session::CognitiveSession::idle_cycle).
+//! - **Inactive when**: never at the phase level. Individual branches
+//!   (e.g. the strategy-EMA update inside `consolidate`) no-op when the
+//!   topic cluster hash is empty, consistent with P5 fail-open.
+//! - **Suppresses**: nothing. Outputs update shared [`WorldModel`]
+//!   state; downstream signal producers compete on the resulting state.
+//! - **Suppressed by**: nothing. No upstream module can veto a phase
+//!   update.
 
 use crate::cognition::belief_state::update_affect;
 use crate::cognition::detector::{detect_response_strategy, extract_topics};
