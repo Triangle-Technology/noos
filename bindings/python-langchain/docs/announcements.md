@@ -1,21 +1,36 @@
 # Outreach drafts — post-publish
 
-Three ready-to-post announcement drafts covering the launch of `noos` +
-`noos-langchain` + `@triangle-technology/noos`. All three frame the same
-two wedges (tool-loop halt + procedural correction memory) for different
-audiences; swap them out as a unit so the positioning stays consistent.
+Four ready-to-post drafts (Show HN, LangChain Discord, Reddit
+r/LocalLLaMA, a tweet) covering the launch of `noos` +
+`noos-langchain` + `@triangle-technology/noos`. All share positioning
+on the same two wedges (tool-loop halt + procedural correction memory)
+so copy-readers see a consistent story no matter which channel they
+land on.
 
-Before posting:
+## Status as of 2026-04-19
 
-1. Confirm all three packages are live on their registries (`pip install
-   noos noos-langchain` succeeds; `npm install @triangle-technology/noos`
-   succeeds).
-2. Update the README at the crate root so the landing page matches the
-   positioning in these posts (real-judge parity as the quality claim,
-   benchmark-backed overhead as the overhead claim).
-3. Confirm the `$47k LangChain tool-loop incident` link
-   (https://github.com/langchain-ai/langchain/issues/13099) still
-   resolves — it's the anchor of the tool-loop framing.
+All three packages live:
+
+- `noos 0.4.0` — https://crates.io/crates/noos
+- `noos 0.1.0` (Python) — https://pypi.org/project/noos/
+- `noos-langchain 0.1.0` — https://pypi.org/project/noos-langchain/
+- `@triangle-technology/noos 0.1.0` (npm) — https://www.npmjs.com/package/@triangle-technology/noos
+
+The crate-root README at https://github.com/Triangle-Technology/noos
+leads with real-LLM + real-judge parity numbers as the quality claim
+and the S33 benchmark (20-250 ns per event, ~2 µs `decide()`, ~30 µs
+per realistic turn) as the overhead claim. Posts below reference both
+consistently. The `$47k LangChain tool-loop incident` anchor
+(https://github.com/langchain-ai/langchain/issues/13099) is the
+tool-loop framing — confirm the link still resolves before posting.
+
+## Timing suggestion
+
+Post all four channels within a 2-hour window so momentum compounds.
+Show HN traffic peaks 08–11 am US-Pacific (22:00 – 01:00 VN). Discord
++ Reddit don't have strong time-of-day peaks; post them in the same
+window for consistency. Tweet last — it should link back to the HN
+post once that's up so the X reader lands on the deeper discussion.
 
 ---
 
@@ -218,3 +233,55 @@ local-model workflows specifically — my evals so far are synthetic +
 mixed-provider, I haven't deployed this against a serious Ollama agent
 in the wild yet.
 ```
+
+---
+
+## Tweet / X
+
+Post last so it can link to the HN discussion (`<HN_LINK>` below —
+swap for the real URL after the Show HN post goes live).
+
+**Single tweet (≤280 chars)**
+
+```
+Just shipped noos-langchain 0.1.0 — drop NoosCallbackHandler into any
+LangChain / LangGraph / CrewAI agent. Pre-delivery halts on tool-loops,
+cost × quality regressions, scope drift. 44 ns / event. MIT.
+
+pip install noos-langchain
+<HN_LINK>
+```
+
+**Thread (3 tweets, for more reach)**
+
+```
+1/  Just shipped noos-langchain 0.1.0 — a pre-delivery regulator for
+    LLM agents. Drop-in callback for LangChain / LangGraph / CrewAI.
+
+    pip install noos noos-langchain
+    https://pypi.org/project/noos-langchain/
+
+2/  Catches the two failure modes that `recursion_limit` + Mem0/Zep
+    don't:
+
+    • Tool-call retry loops (the $47k LangChain incident pattern)
+    • Procedural amnesia — agent making the same mistake user already
+      corrected
+
+    Fires a `CircuitBreak(RepeatedToolCallLoop)` at 5 consecutive
+    same-tool calls, a `ProceduralWarning` at 3 corrections on the
+    same cluster.
+
+3/  Honest eval numbers: real-LLM + real-judge runs show quality
+    parity with baseline (|Δ| ≤ 0.05). Infrastructure, not a quality
+    booster. 20-250 ns per event, ~30 µs per realistic turn — 6
+    orders of magnitude below an LLM call.
+
+    More: <HN_LINK>
+```
+
+**LinkedIn / longer form (~1200 chars)**
+
+Same pitch as Show HN but with a short prelude naming the team /
+project context. Use when posting in an org's product feed vs a
+personal dev community.

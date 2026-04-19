@@ -54,7 +54,7 @@ generation, strip drifted material.
 
 ```toml
 [dependencies]
-noos = "0.3"
+noos = "0.4"
 ```
 
 ```rust
@@ -349,7 +349,7 @@ data-variant enums.
 ### Python — `bindings/python/`
 
 ```bash
-pip install noos   # once published; PyO3 abi3-py39 wheels
+pip install noos   # PyO3 abi3-py39 wheels, Python >=3.9
 ```
 
 ```python
@@ -368,10 +368,44 @@ if d.kind == "circuit_break":
 
 See [`bindings/python/README.md`](bindings/python/README.md).
 
+### Python — LangChain / LangGraph / CrewAI adapter — `bindings/python-langchain/`
+
+Drop `NoosCallbackHandler` into any agent built on `langchain-core` —
+LangChain, LangGraph, CrewAI (via its LLM's `callbacks=[...]` list),
+anything using `BaseCallbackHandler`. The handler maps LC's standard
+hooks (`on_chain_start`, `on_llm_end`, `on_tool_start`, `on_tool_end`,
+...) onto `LLMEvent` calls; `handler.last_decision` updates after each
+event, and `raise_on_circuit_break=True` aborts the run via
+`CircuitBreakError` the moment a halt decision fires.
+
+```bash
+pip install noos noos-langchain
+```
+
+```python
+from noos import Regulator
+from noos_langchain import NoosCallbackHandler, CircuitBreakError
+from langchain.agents import AgentExecutor, create_tool_calling_agent
+
+regulator = Regulator.for_user("alice").with_cost_cap(10_000)
+handler = NoosCallbackHandler(regulator, raise_on_circuit_break=True)
+
+executor = AgentExecutor(agent=agent, tools=tools, callbacks=[handler])
+try:
+    result = executor.invoke({"input": "Find order 42"})
+except CircuitBreakError as e:
+    print(f"Halted: {e.decision.reason.kind} — {e.decision.suggestion}")
+```
+
+Sync + async handlers (`AsyncNoosCallbackHandler` for `ainvoke` /
+`astream` / LangGraph async). Zero Python-side overhead beyond a
+dict lookup per hook. See
+[`bindings/python-langchain/README.md`](bindings/python-langchain/README.md).
+
 ### Node.js / TypeScript — `bindings/node/`
 
 ```bash
-npm install @triangle-technology/noos   # once published; napi-rs native addon
+npm install @triangle-technology/noos   # napi-rs prebuilt binaries
 ```
 
 ```typescript
