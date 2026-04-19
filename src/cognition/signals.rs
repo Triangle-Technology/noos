@@ -57,6 +57,19 @@ const PE_SALIENCE_WEIGHT: f64 = 0.2;
 /// decrease reliance on current model (Behrens 2007).
 const VOLATILITY_CONFIDENCE_REDUCTION: f64 = 0.5;
 
+/// Weight of "lost sustained arousal capacity" on the conservation signal.
+/// Kept at 0.2 so sustained-arousal penalty is a modulator, not a driver
+/// — body_budget and resource_pressure are the primary conservation
+/// drivers; this is the slow-timescale fatigue tax on top (Yerkes-Dodson
+/// inverted-U on prolonged stress).
+const SUSTAINED_AROUSAL_CONSERVATION_WEIGHT: f64 = 0.2;
+
+/// Minimum divisor when normalizing budget_factor. Prevents a near-zero
+/// adaptive threshold from dividing by 0 (which would produce ±inf and
+/// cascade through the clamp). 0.01 is well below any realistic
+/// conservation threshold (typical adaptive threshold ∈ [0.2, 0.5]).
+const BUDGET_FACTOR_MIN_DIVISOR: f64 = 0.01;
+
 // ── Core Function ──────────────────────────────────────────────────────
 
 /// Compute application-facing allostatic signals from settled cognitive state.
@@ -84,12 +97,13 @@ pub fn compute_signals(model: &WorldModel, gain_mode: GainMode) -> CognitiveSign
     // Budget factor: how far below the adaptive threshold.
     // 0 = budget above threshold (healthy). 1 = budget at zero (critical).
     let budget_factor = if model.body_budget < budget_threshold {
-        (budget_threshold - model.body_budget) / budget_threshold.max(0.01)
+        (budget_threshold - model.body_budget) / budget_threshold.max(BUDGET_FACTOR_MIN_DIVISOR)
     } else {
         0.0
     };
     // Sustained arousal penalty: prolonged stress depletes capacity.
-    let sustained_penalty = (1.0 - model.belief.affect.sustained).max(0.0) * 0.2;
+    let sustained_penalty =
+        (1.0 - model.belief.affect.sustained).max(0.0) * SUSTAINED_AROUSAL_CONSERVATION_WEIGHT;
     let conservation = clamp(
         budget_factor + model.resource_pressure * PRESSURE_CONSERVATION_WEIGHT + sustained_penalty,
         0.0,

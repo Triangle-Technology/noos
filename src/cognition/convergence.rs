@@ -59,6 +59,14 @@ pub const MAX_ITERATIONS: usize = 5;
 /// Prevents oscillation while allowing meaningful updates per iteration.
 pub const DAMPING_ALPHA: f64 = 0.5;
 
+/// RPE weight on gate confidence for LC gain nudging.
+/// Gate confidence is the primary signal; recent reward prediction
+/// error modulates it by up to ±15%. Weight kept small because the
+/// RPE signal is noisier than gate confidence — the LC integrates
+/// both but favors the cleaner signal (Aston-Jones & Cohen 2005,
+/// §Task utility).
+const LC_RPE_NUDGE_WEIGHT: f64 = 0.15;
+
 // ── Result ─────────────────────────────────────────────────────────────
 
 /// Result of the convergence loop.
@@ -183,7 +191,7 @@ fn run_one_iteration(
     // Aston-Jones 2005: LC responds to arousal (salient stimuli) and confidence (task utility).
     lc.set_arousal(after_perceive.belief.affect.arousal);
     let rpe_adjusted = clamp(
-        gate_result.confidence + after_perceive.response_rpe * 0.15,
+        gate_result.confidence + after_perceive.response_rpe * LC_RPE_NUDGE_WEIGHT,
         0.0,
         1.0,
     );
