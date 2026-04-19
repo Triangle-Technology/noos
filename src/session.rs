@@ -697,6 +697,37 @@ mod tests {
     }
 
     #[test]
+    fn track_cost_nan_does_not_corrupt_body_budget() {
+        // CR4 invariant: body_budget MUST stay in [0, 1]. A NaN-clamped
+        // cost must not propagate into body_budget. This test exists
+        // because f64::clamp(NaN, a, b) returns NaN — Noos uses
+        // math::clamp (NaN-absorbing) at the boundary for P5 fail-open.
+        let mut session = CognitiveSession::new();
+        let initial = session.world_model().body_budget;
+        session.track_cost(f64::NAN);
+        let after = session.world_model().body_budget;
+        assert!(
+            after.is_finite() && (0.0..=1.0).contains(&after),
+            "NaN cost must not corrupt body_budget: was {initial} → {after}"
+        );
+    }
+
+    #[test]
+    fn track_cost_infinity_does_not_corrupt_body_budget() {
+        // Same invariant for ±inf. math::clamp absorbs +inf to max (1.0)
+        // and -inf to min (0.0) — neither should escape.
+        let mut session = CognitiveSession::new();
+        session.track_cost(f64::INFINITY);
+        let pos_after = session.world_model().body_budget;
+        assert!(pos_after.is_finite() && (0.0..=1.0).contains(&pos_after));
+
+        let mut session2 = CognitiveSession::new();
+        session2.track_cost(f64::NEG_INFINITY);
+        let neg_after = session2.world_model().body_budget;
+        assert!(neg_after.is_finite() && (0.0..=1.0).contains(&neg_after));
+    }
+
+    #[test]
     fn track_cost_reflected_in_conservation_signal() {
         let mut session = CognitiveSession::new();
         let baseline = session.process_message("Hello");
