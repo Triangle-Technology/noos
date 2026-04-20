@@ -58,7 +58,35 @@
 //!
 //! # Summary only (skip per-event lines)
 //! cargo run --release --example shadow_replay -- --summary-only < events.jsonl
+//!
+//! # Drift-threshold calibration: capture EVERY drift score, not just
+//! # those above 0.5. Pair with --summary-only for a compact report.
+//! cargo run --release --example shadow_replay -- \
+//!     --scope-threshold=0.0 --summary-only < events.jsonl
+//!
+//! # Simulate a 0.7 default (suppress verbose-LLM false positives):
+//! cargo run --release --example shadow_replay -- --scope-threshold=0.7 < events.jsonl
 //! ```
+//!
+//! ## Summary output
+//!
+//! The final `_summary` line always carries turn / event / decision counts.
+//! When at least one ScopeDriftWarn fires, an additional `drift_score_stats`
+//! object appears with:
+//!
+//! - `count` — observed drift scores (one per ScopeDriftWarn emission)
+//! - `min` / `max` / `mean` / `p50` / `p95` — summary statistics
+//! - `histogram` — 10 bins over `[0.0, 1.0]` (bin width 0.1)
+//! - `threshold_sweep` — "if threshold were X, how many would fire?" at
+//!   `X ∈ {0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9}`. Drives data-informed
+//!   decisions on whether to raise the per-Regulator threshold via
+//!   `Regulator::with_scope_drift_threshold`.
+//!
+//! Drift statistics reflect ONLY the scores the regulator actually
+//! emitted via `Decision::ScopeDriftWarn`. To see the full
+//! sub-threshold distribution for calibration, pass
+//! `--scope-threshold=0.0` which forces every non-empty turn to surface
+//! its raw score.
 //!
 //! ## Exit status
 //!
@@ -124,6 +152,89 @@ struct SummaryBody {
     turns_with_circuit_break: usize,
     /// Turns where at least one ProceduralWarning fired.
     turns_with_procedural_warning: usize,
+    /// Distribution summary over observed drift scores. `None` when no
+    /// `Decision::ScopeDriftWarn` fired in the stream. See module docs
+    /// for interpretation + calibration workflow.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    drift_score_stats: Option<DriftStats>,
+}
+
+/// Summary of drift scores observed across all emitted
+/// `Decision::ScopeDriftWarn` events. Produced at end-of-stream from the
+/// raw score list. Serialisation order is stable so downstream scripts
+/// can rely on field positions.
+#[derive(Debug, Serialize)]
+struct DriftStats {
+    count: usize,
+    min: f64,
+    mean: f64,
+    p50: f64,
+    p95: f64,
+    max: f64,
+    /// 10 bins over `[0.0, 1.0]` with width 0.1. Index i covers
+    /// `[i * 0.1, (i + 1) * 0.1)` except the last bin which includes
+    /// the upper bound (so 1.0 lands in bin 9).
+    histogram: [usize; 10],
+    /// "If the regulator threshold were X, how many of these scores
+    /// would fire?" Keyed by formatted-float string so the JSON object
+    /// has stable "0.3" / "0.7" keys downstream tools can grep for.
+    /// Calibration hook: compare 0.5 default vs 0.7 verbose-model
+    /// candidate directly.
+    threshold_sweep: Vec<(String, usize)>,
+}
+
+impl DriftStats {
+    /// Compute statistics from a raw score list. Returns `None` on empty
+    /// input so the parent summary can omit the field cleanly.
+    fn from_scores(mut scores: Vec<f64>) -> Option<Self> {
+        if scores.is_empty() {
+            return None;
+        }
+        // NaN shouldn't appear (the Regulator's metric never produces
+        // non-finite values) but sort defensively with `total_cmp` so a
+        // stray NaN doesn't panic the pipeline.
+        scores.sort_by(|a, b| a.total_cmp(b));
+        let count = scores.len();
+        let min = scores[0];
+        let max = scores[count - 1];
+        let sum: f64 = scores.iter().sum();
+        let mean = sum / count as f64;
+        // Nearest-rank quantile: simple, no interpolation, deterministic
+        // at small N. For p95 on 10 scores we pick index 9 (highest),
+        // matching what a practitioner would eyeball from a stem-and-leaf.
+        let p50 = scores[count / 2];
+        let p95_idx = ((count as f64 * 0.95).ceil() as usize).saturating_sub(1);
+        let p95 = scores[p95_idx.min(count - 1)];
+
+        let mut histogram = [0usize; 10];
+        for &s in &scores {
+            // Clamp defensively. bin = floor(s * 10), but s=1.0 would
+            // produce bin 10 — fold into bin 9 so the last bucket is
+            // inclusive of 1.0.
+            let bin = ((s.clamp(0.0, 1.0) * 10.0) as usize).min(9);
+            histogram[bin] += 1;
+        }
+
+        let thresholds = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+        let threshold_sweep = thresholds
+            .iter()
+            .map(|&t| {
+                let turns_at_or_above = scores.iter().filter(|&&s| s >= t).count();
+                (format!("{t:.1}"), turns_at_or_above)
+            })
+            .collect();
+
+        Some(DriftStats {
+            count,
+            min,
+            mean,
+            p50,
+            p95,
+            max,
+            histogram,
+            threshold_sweep,
+        })
+    }
 }
 
 /// CLI options parsed from argv.
@@ -131,6 +242,10 @@ struct SummaryBody {
 struct CliArgs {
     cost_cap: Option<u32>,
     summary_only: bool,
+    /// Overrides the default `Regulator` scope-drift threshold (0.5).
+    /// Pass `0.0` to surface the full distribution for calibration;
+    /// pass `0.7` to simulate a verbose-LLM-tolerant default.
+    scope_threshold: Option<f64>,
 }
 
 /// Parse CLI flags from `std::env::args()`.
@@ -146,6 +261,18 @@ fn parse_args() -> CliArgs {
             match val.parse::<u32>() {
                 Ok(n) => args.cost_cap = Some(n),
                 Err(e) => eprintln!("shadow_replay: ignoring invalid --cost-cap={val}: {e}"),
+            }
+        } else if let Some(val) = arg.strip_prefix("--scope-threshold=") {
+            match val.parse::<f64>() {
+                Ok(t) if t.is_finite() && (0.0..=1.0).contains(&t) => {
+                    args.scope_threshold = Some(t);
+                }
+                Ok(t) => eprintln!(
+                    "shadow_replay: ignoring --scope-threshold={t} (must be finite and in [0.0, 1.0])"
+                ),
+                Err(e) => eprintln!(
+                    "shadow_replay: ignoring invalid --scope-threshold={val}: {e}"
+                ),
             }
         } else if arg == "--summary-only" {
             args.summary_only = true;
@@ -165,12 +292,15 @@ fn print_help() {
     eprintln!("shadow_replay — pipe JSONL agent events → JSONL regulator decisions");
     eprintln!();
     eprintln!("USAGE:");
-    eprintln!("  shadow_replay [--cost-cap=N] [--summary-only] < events.jsonl");
+    eprintln!("  shadow_replay [--cost-cap=N] [--scope-threshold=F]");
+    eprintln!("                [--summary-only] < events.jsonl");
     eprintln!();
     eprintln!("FLAGS:");
-    eprintln!("  --cost-cap=N      Enable CircuitBreak(CostCapReached) at N tokens");
-    eprintln!("  --summary-only    Suppress per-event lines; emit only the _summary line");
-    eprintln!("  -h, --help        Print this help");
+    eprintln!("  --cost-cap=N          Enable CircuitBreak(CostCapReached) at N tokens");
+    eprintln!("  --scope-threshold=F   Override scope-drift threshold (default 0.5);");
+    eprintln!("                        pass 0.0 for calibration (surfaces every score)");
+    eprintln!("  --summary-only        Suppress per-event lines; emit only _summary");
+    eprintln!("  -h, --help            Print this help");
 }
 
 /// Classify a Decision into a short kind tag suitable for aggregation.
@@ -247,6 +377,10 @@ fn main() -> ExitCode {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     let mut summary = Summary::default();
+    // Drift scores observed across every `Decision::ScopeDriftWarn`
+    // emission in the whole stream. Used at end-of-run to produce
+    // `DriftStats` (histogram + threshold sweep).
+    let mut drift_scores: Vec<f64> = Vec::new();
 
     for turn_id in &turn_order {
         let mut events = match turns.remove(turn_id) {
@@ -260,6 +394,9 @@ fn main() -> ExitCode {
         let mut regulator = Regulator::for_user(turn_id.as_str());
         if let Some(cap) = args.cost_cap {
             regulator = regulator.with_cost_cap(cap);
+        }
+        if let Some(threshold) = args.scope_threshold {
+            regulator = regulator.with_scope_drift_threshold(threshold);
         }
 
         let mut turn_had_scope_drift = false;
@@ -287,7 +424,10 @@ fn main() -> ExitCode {
             *summary.body.decisions.entry(kind.to_string()).or_insert(0) += 1;
 
             match &decision {
-                Decision::ScopeDriftWarn { .. } => turn_had_scope_drift = true,
+                Decision::ScopeDriftWarn { drift_score, .. } => {
+                    turn_had_scope_drift = true;
+                    drift_scores.push(*drift_score);
+                }
                 Decision::CircuitBreak { ref reason, .. } => {
                     turn_had_circuit_break = true;
                     let reason_kind = circuit_break_reason_kind(reason);
@@ -337,6 +477,9 @@ fn main() -> ExitCode {
             summary.body.turns_with_procedural_warning += 1;
         }
     }
+
+    // Finalize drift-score statistics before serialization.
+    summary.body.drift_score_stats = DriftStats::from_scores(drift_scores);
 
     // Emit aggregate. Even with --summary-only, this is the authoritative
     // line the caller should parse.
@@ -520,6 +663,95 @@ mod tests {
             provider: Some("anthropic".into()),
         });
         let _ = reg.decide();
+    }
+
+    #[test]
+    fn drift_stats_from_empty_returns_none() {
+        assert!(DriftStats::from_scores(Vec::new()).is_none());
+    }
+
+    #[test]
+    fn drift_stats_computes_summary_stats() {
+        // Fixed input → fixed output. Verifies all statistics against
+        // hand-computed expected values.
+        let scores = vec![0.1, 0.3, 0.5, 0.7, 0.9];
+        let stats = DriftStats::from_scores(scores).expect("non-empty");
+        assert_eq!(stats.count, 5);
+        assert!((stats.min - 0.1).abs() < 1e-9);
+        assert!((stats.max - 0.9).abs() < 1e-9);
+        assert!((stats.mean - 0.5).abs() < 1e-9);
+        assert!((stats.p50 - 0.5).abs() < 1e-9);
+        // ceil(5 * 0.95) = 5, index 4 → 0.9.
+        assert!((stats.p95 - 0.9).abs() < 1e-9);
+    }
+
+    #[test]
+    fn drift_stats_histogram_bins_values_correctly() {
+        // Each value should land in its own bin.
+        let scores = vec![0.05, 0.15, 0.45, 0.75, 0.95, 1.0];
+        let stats = DriftStats::from_scores(scores).expect("non-empty");
+        // 0.05 → bin 0, 0.15 → bin 1, 0.45 → bin 4, 0.75 → bin 7,
+        // 0.95 → bin 9, 1.0 → bin 9 (inclusive upper bound).
+        assert_eq!(stats.histogram[0], 1);
+        assert_eq!(stats.histogram[1], 1);
+        assert_eq!(stats.histogram[4], 1);
+        assert_eq!(stats.histogram[7], 1);
+        assert_eq!(stats.histogram[9], 2);
+        // All other bins are 0.
+        assert_eq!(stats.histogram.iter().sum::<usize>(), 6);
+    }
+
+    #[test]
+    fn drift_stats_threshold_sweep_is_monotonic_decreasing() {
+        // Raising the threshold can only reduce (or hold) the number of
+        // drift scores that would qualify — monotonic non-increasing.
+        let scores = (0..20).map(|i| i as f64 / 20.0).collect::<Vec<_>>();
+        let stats = DriftStats::from_scores(scores).expect("non-empty");
+        let sweep = &stats.threshold_sweep;
+        for w in sweep.windows(2) {
+            assert!(
+                w[0].1 >= w[1].1,
+                "threshold_sweep must be monotonic non-increasing, \
+                 found {}={} then {}={}",
+                w[0].0,
+                w[0].1,
+                w[1].0,
+                w[1].1
+            );
+        }
+        // At threshold 0.0 (not in sweep), all 20 would qualify.
+        // At 0.3, scores >= 0.3 are {0.30, 0.35, ..., 0.95}. Count = 14.
+        assert_eq!(sweep[0].0, "0.3");
+        assert_eq!(sweep[0].1, 14);
+    }
+
+    #[test]
+    fn drift_stats_threshold_sweep_keys_are_stable() {
+        // Downstream scripts grep for "0.5" / "0.7"; keys must be
+        // formatted to one decimal regardless of locale or NaN drift.
+        let stats = DriftStats::from_scores(vec![0.5]).expect("non-empty");
+        let expected_keys = ["0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9"];
+        let got_keys: Vec<&str> = stats.threshold_sweep.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(got_keys, expected_keys);
+    }
+
+    #[test]
+    fn drift_stats_upper_bin_inclusive() {
+        // Defensive: drift score 1.0 must land in bin 9 (not bin 10).
+        let stats = DriftStats::from_scores(vec![1.0, 1.0, 1.0]).expect("non-empty");
+        assert_eq!(stats.histogram[9], 3);
+        assert_eq!(stats.count, 3);
+    }
+
+    #[test]
+    fn drift_stats_nan_does_not_panic() {
+        // NaN shouldn't appear, but sort must not panic if one slips in.
+        // Using `total_cmp` makes the sort well-defined even with NaN
+        // (NaN sorts consistently but the resulting quantiles are
+        // meaningless; the test only guards against a panic).
+        let scores = vec![0.1, f64::NAN, 0.5];
+        // This must not panic.
+        let _ = DriftStats::from_scores(scores);
     }
 
     #[test]
