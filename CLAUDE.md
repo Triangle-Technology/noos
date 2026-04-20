@@ -546,6 +546,14 @@ cargo run --example regulator_implicit_correction_demo      # Demo 5 (Session 32
 cargo run --example task_eval_real_llm_regulator            # 50-query canned (CI reproducibility guard only: +29.2% cost, +0.85 q/1k — synthetic oracle artifact, NOT real-workload claim)
 cargo run --example task_eval_real_llm_regulator -- ollama  # Live via Ollama phi3:mini (add NOOS_JUDGE=anthropic for real grading; S36 N=29 interleaved: Δmean_q=−0.026, Δcost=−5.4%)
 cargo run --example task_eval_real_llm_regulator -- anthropic # Live via Anthropic Haiku (add NOOS_JUDGE=anthropic for real grading; S36 N=50: Δmean_q=+0.048, Δcost=+11.6%)
+
+# Offline shadow replay CLI (Session 39, 2026-04-20) — JSONL events → Regulator → JSONL decisions + summary.
+# Language-agnostic; works with any pipeline that can emit JSON (D1 export, log file, eval harness output).
+# Dual-use: SC dev-time eval integration (cross-repo, see `semantic-computer/eval/run-with-noos-replay.mjs`)
+# + future production shadow replay + 6th flagship demo for crates.io users.
+cargo run --release --example shadow_replay < events.jsonl                               # Basic
+cargo run --release --example shadow_replay -- --cost-cap=10000 < events.jsonl           # With cost cap
+cargo run --release --example shadow_replay -- --summary-only < events.jsonl             # Just the _summary line
 ```
 
 ## Recent sessions
