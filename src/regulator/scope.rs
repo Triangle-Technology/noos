@@ -81,6 +81,7 @@
 //! revisit then — not preemptively.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use crate::cognition::detector;
 
@@ -97,6 +98,57 @@ use crate::cognition::detector;
 /// false-positive rate on 10 hand-crafted cases; if FPR > 20%, this
 /// constant (or the metric itself) is the first knob to revisit.
 pub const DRIFT_WARN_THRESHOLD: f64 = 0.5;
+
+/// Minimum length for morphological prefix matching in [`task_anchored`].
+///
+/// At 4, `user` (len 4) can prefix-match `users` (morphological variant)
+/// but `ai` (2) cannot match `aim` (spurious). Short tech terms in
+/// [`detector::extract_meaningful_words`] are kept in the keyword bag
+/// (via [`detector::extract_meaningful_words`]'s `TECH_TERMS` carve-out)
+/// but NOT eligible for prefix expansion — they match exactly only.
+const MIN_STEM_PREFIX_LEN: usize = 4;
+
+/// True when `response_token` shares a morphological root with any
+/// `task_token`, either by exact lowercased membership in `task_set`
+/// or by bidirectional prefix match (the shorter of the pair is a
+/// prefix of the longer, both ≥ [`MIN_STEM_PREFIX_LEN`]).
+///
+/// Catches the common English morphological class the 2026-04-20
+/// empirical Gemini smoke surfaced — `async` (task) vs `asynchronous`
+/// (response), `await` vs `awaited`, `configure` vs `configured`. Does
+/// NOT resolve synonyms (`make async` ≠ `non-blocking`) nor rank-11
+/// alphabetical truncation — those remain documented limitations
+/// addressed by the adversarial tests.
+///
+/// O(|task_tokens|) per response token; with `extract_topics`' top-10
+/// cap this is ≤ 10 comparisons — negligible versus the µs-scale cost
+/// of a `Regulator::decide` call.
+fn task_anchored(
+    response_token: &str,
+    task_set: &HashSet<String>,
+    task_tokens: &[String],
+) -> bool {
+    if task_set.contains(response_token) {
+        return true;
+    }
+    if response_token.len() < MIN_STEM_PREFIX_LEN {
+        return false;
+    }
+    for task_token in task_tokens {
+        if task_token.len() < MIN_STEM_PREFIX_LEN {
+            continue;
+        }
+        let (shorter, longer) = if task_token.len() <= response_token.len() {
+            (task_token.as_str(), response_token)
+        } else {
+            (response_token, task_token.as_str())
+        };
+        if longer.starts_with(shorter) {
+            return true;
+        }
+    }
+    false
+}
 
 // ── ScopeTracker ───────────────────────────────────────────────────────
 
@@ -155,32 +207,45 @@ impl ScopeTracker {
     }
 
     /// Drift score in `[0, 1]` — fraction of response keywords that do
-    /// not appear in the task. Returns `None` when either bag is empty
-    /// (no baseline for comparison).
+    /// not share a morphological root with any task keyword. Returns
+    /// `None` when either bag is empty (no baseline for comparison).
     ///
-    /// See module docs for the metric definition and its known
-    /// false-positive regime.
+    /// Anchoring is two-tier: exact lowercased membership in the task
+    /// set OR bidirectional prefix match via [`task_anchored`] (both
+    /// tokens ≥ [`MIN_STEM_PREFIX_LEN`]). The prefix tier absorbs the
+    /// common English morphological class (`async` ↔ `asynchronous`,
+    /// `await` ↔ `awaited`, `configure` ↔ `configured`) that the
+    /// 2026-04-20 empirical Gemini smoke flagged as a false-positive
+    /// source on technical prompts.
+    ///
+    /// See module docs for the metric rationale and the remaining
+    /// known false-positive regimes (synonyms, rank-11 truncation,
+    /// verbose on-topic).
     pub fn drift_score(&self) -> Option<f64> {
         if self.task_keywords.is_empty() || self.response_keywords.is_empty() {
             return None;
         }
         let task_set = detector::to_topic_set(&self.task_keywords);
-        let overlap = detector::count_topic_overlap(&self.response_keywords, &task_set);
-        let non_task = self.response_keywords.len() - overlap;
+        let non_task = self
+            .response_keywords
+            .iter()
+            .filter(|r| !task_anchored(&r.to_lowercase(), &task_set, &self.task_keywords))
+            .count();
         Some(non_task as f64 / self.response_keywords.len() as f64)
     }
 
-    /// Response keywords that do not appear in the task — the concrete
-    /// "drift" set surfaced in [`Decision::ScopeDriftWarn`](super::Decision::ScopeDriftWarn).
+    /// Response keywords that are NOT morphologically anchored in the
+    /// task — the concrete "drift" set surfaced in
+    /// [`Decision::ScopeDriftWarn`](super::Decision::ScopeDriftWarn).
     ///
     /// Empty when no response is set or when every response keyword is
-    /// anchored in the task. Ordering mirrors
+    /// anchored in the task (exactly or via prefix). Ordering mirrors
     /// [`response_tokens`](Self::response_tokens) (alphabetical).
     pub fn drift_tokens(&self) -> Vec<String> {
         let task_set = detector::to_topic_set(&self.task_keywords);
         self.response_keywords
             .iter()
-            .filter(|k| !task_set.contains(&k.to_lowercase()))
+            .filter(|k| !task_anchored(&k.to_lowercase(), &task_set, &self.task_keywords))
             .cloned()
             .collect()
     }
@@ -527,6 +592,118 @@ mod tests {
             drift < 0.1,
             "case-insensitive matching must treat identical text as \
              zero drift (got {drift})"
+        );
+    }
+
+    // ── Morphological prefix matching (2026-04-20 Gemini smoke fix) ─────
+
+    #[test]
+    fn morphological_prefix_match_anchors_async_and_asynchronous() {
+        // 2026-04-20 empirical smoke reproducer: Gemini answered
+        // "Explain async/await in JavaScript" with response using
+        // "asynchronous" + "awaited" — surface-form different from
+        // "async" + "await" in the task but same morphological root.
+        // Before fix: both counted as drift, bumping score to 0.8.
+        // After fix: prefix match anchors them, drift reduced.
+        let mut t = ScopeTracker::new();
+        t.set_task("Explain what async/await does in JavaScript. Two sentences maximum.");
+        t.set_response(
+            "async/await provides a cleaner, more synchronous-looking syntax for \
+             writing asynchronous code in JavaScript, making it easier to manage \
+             operations that take time without blocking. An async function \
+             implicitly returns a Promise, and await pauses execution until \
+             awaited Promise settles.",
+        );
+        let drift = t.drift_score().expect("both sides populated");
+        // With morphological matching `async` anchors `asynchronous`,
+        // `await` anchors `awaited`. Drift score drops but stays above
+        // zero because the response adds genuinely new vocabulary
+        // (cleaner, blocking, code, etc). Regression guard: after-fix
+        // score MUST be lower than the pre-fix 0.8 baseline.
+        assert!(
+            drift < 0.8,
+            "prefix-match fix must reduce drift below pre-fix baseline 0.8 (got {drift})"
+        );
+    }
+
+    #[test]
+    fn morphological_prefix_match_bidirectional() {
+        // Task uses the longer form, response uses the shorter form —
+        // the same prefix-match logic must fire in both directions.
+        let mut t = ScopeTracker::new();
+        t.set_task("asynchronous programming patterns");
+        t.set_response("async code patterns");
+        let drift = t.drift_score().expect("both sides populated");
+        // With bidirectional matching `async` (response) shares prefix
+        // with `asynchronous` (task) → anchored. `code` is new → drift.
+        // `patterns` exact match. Drift = 1 / 3 ≈ 0.33 < 0.5 threshold.
+        assert!(
+            drift < DRIFT_WARN_THRESHOLD,
+            "bidirectional prefix match should keep this below threshold (got {drift})"
+        );
+    }
+
+    #[test]
+    fn morphological_prefix_match_respects_min_length() {
+        // Guard against over-matching on short tokens: a 3-letter task
+        // word must NOT anchor an unrelated response word that happens
+        // to share those 3 letters as prefix. `MIN_STEM_PREFIX_LEN = 4`
+        // enforces this.
+        let mut t = ScopeTracker::new();
+        t.set_task("fix bug"); // extract: [bug, fix] — both len 3
+        t.set_response("fixture bugs arguments"); // extract: [arguments, bugs, fixture]
+        // `fix` (len 3) is NOT eligible for prefix matching. `fixture`
+        // must NOT falsely anchor to `fix`. Only exact match.
+        // - arguments: no exact, no prefix match eligible → drift
+        // - bugs: no exact (task has `bug`), prefix? `bug` len 3 NOT
+        //   eligible for prefix. `bugs` (4) vs `bug` (3) — both directions
+        //   require len ≥ 4. `bug` can't qualify. → drift
+        // - fixture: same story → drift
+        // Drift = 3/3 = 1.0.
+        let drift = t.drift_score().expect("both sides populated");
+        assert!(
+            drift >= DRIFT_WARN_THRESHOLD,
+            "short-token drift must not be masked by prefix match (got {drift})"
+        );
+    }
+
+    #[test]
+    fn morphological_prefix_match_does_not_mask_real_drift() {
+        // Truly disjoint vocabularies must still flag. The prefix match
+        // anchors morphological variants, not arbitrary prefix overlaps
+        // with unrelated content.
+        let mut t = ScopeTracker::new();
+        t.set_task("explain tokio runtime");
+        t.set_response("chocolate cake baking instructions");
+        // No task token is prefix of any response token (or vice-versa).
+        // Must still flag as drift.
+        let drift = t.drift_score().expect("both sides populated");
+        assert!(
+            drift >= DRIFT_WARN_THRESHOLD,
+            "fully disjoint vocabulary must still flag drift (got {drift})"
+        );
+    }
+
+    #[test]
+    fn morphological_prefix_match_drift_tokens_excludes_anchored() {
+        // Sanity: `drift_tokens` must reflect the same anchoring logic
+        // as `drift_score` — a response token that prefix-matches a
+        // task token should NOT appear in the drift token list.
+        let mut t = ScopeTracker::new();
+        t.set_task("refactor async function");
+        t.set_response("refactored async function completely");
+        let drift_tokens = t.drift_tokens();
+        // `refactored` prefix-matches `refactor` → anchored, NOT in drift.
+        // `completely` (10) — no task prefix → drift.
+        assert!(
+            !drift_tokens.contains(&"refactored".to_string()),
+            "`refactored` should be morphologically anchored to `refactor` \
+             (drift_tokens = {drift_tokens:?})"
+        );
+        assert!(
+            drift_tokens.contains(&"completely".to_string()),
+            "`completely` has no task anchor and MUST appear in drift_tokens \
+             (got {drift_tokens:?})"
         );
     }
 
