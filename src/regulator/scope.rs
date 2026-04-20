@@ -3,12 +3,13 @@
 //!
 //! **Scope note (P1 / P9b)**: like the other `regulator` sub-modules,
 //! this is an I/O adapter, not a cognitive module. Keyword extraction
-//! reuses [`cognition::detector::extract_topics`](crate::cognition::detector::extract_topics)
+//! reuses [`cognition::detector::extract_topics_ranked`](crate::cognition::detector::extract_topics_ranked)
 //! per P3 — that utility strips stop-words and short tokens and returns
-//! a small sorted set of "meaningful words". Here those sets are
-//! treated as opaque keyword bags, not cognitive topic models. The only
-//! computation performed is a set-difference ratio — no sentiment
-//! lexicon, no topic reasoning. P1 applies to the wrapped
+//! a small ranked set of "meaningful words" ordered by (frequency,
+//! length, alphabetical). Here those sets are treated as opaque
+//! keyword bags, not cognitive topic models. The only computation
+//! performed is a set-difference ratio — no sentiment lexicon, no
+//! topic reasoning. P1 applies to the wrapped
 //! [`CognitiveSession`](crate::session::CognitiveSession); P9b is
 //! satisfied by construction.
 //!
@@ -56,13 +57,22 @@
 //! Session 18 decision checkpoint measures. Embedding-based detection
 //! is deferred until the 10-case false-positive audit runs.
 //!
-//! ## Reuse-vs-roll decision for `detector` (Session 18)
+//! ## Reuse-vs-roll decision for `detector` (Session 18 → refined 2026-04-20)
 //!
 //! Reused, three functions:
 //!
-//! - [`extract_topics`](crate::cognition::detector::extract_topics) —
-//!   keyword extraction (stop-word filter, min-length 3, top-10
-//!   alphabetical). Already used by `memory/retrieval.rs`.
+//! - [`extract_topics_ranked`](crate::cognition::detector::extract_topics_ranked) —
+//!   keyword extraction (stop-word filter, min-length 3, top-20 by
+//!   frequency + length + alphabetical). **Scope drift uses the ranked
+//!   variant**, not [`extract_topics`](crate::cognition::detector::extract_topics),
+//!   because the 2026-04-20 empirical Gemini smoke surfaced the
+//!   "rank-11 alphabetical truncation" FP regime: long task prompts
+//!   with >10 meaningful words silently dropped alphabetically-late
+//!   keywords (`timeout`, `user`, `yaml`), so a response reusing those
+//!   dropped keywords scored 100% drift despite being on-topic.
+//!   Frequency-ranked + cap-20 absorbs the common cases; length-DESC
+//!   tiebreaker surfaces specific-looking words over short ones when
+//!   frequencies tie (typical short prompts).
 //! - [`to_topic_set`](crate::cognition::detector::to_topic_set) —
 //!   lowercased `HashSet<String>` builder for O(1) membership lookup.
 //! - [`count_topic_overlap`](crate::cognition::detector::count_topic_overlap) —
@@ -75,10 +85,13 @@
 //! set-difference *subtraction* (`|response| − overlap`) and the
 //! `drift_tokens` filter — neither has a pre-existing utility.
 //!
-//! If the Session 18 decision checkpoint surfaces a specific regime
-//! where `extract_topics` is wrong for scope-drift (e.g. alphabetical
-//! sort clipping important long-tail keywords after position 10),
-//! revisit then — not preemptively.
+//! Non-scope callers of `extract_topics` (world_model, belief_state,
+//! memory/retrieval) still use the alphabetical top-10 variant to
+//! preserve cluster-key stability for persisted
+//! `LearnedState.response_strategies` + `correction_patterns` —
+//! changing those keys retroactively would break `import()` round-trip
+//! on snapshots written by older versions. Ranked vs alphabetical is
+//! a deliberate split, not P3 duplication.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -98,6 +111,17 @@ use crate::cognition::detector;
 /// false-positive rate on 10 hand-crafted cases; if FPR > 20%, this
 /// constant (or the metric itself) is the first knob to revisit.
 pub const DRIFT_WARN_THRESHOLD: f64 = 0.5;
+
+/// Maximum keywords retained per task / response bag by
+/// [`ScopeTracker`]. The 2026-04-20 empirical Gemini smoke showed that
+/// the legacy top-10 alphabetical cap in [`extract_topics`] silently
+/// dropped content words on verbose prompts (e.g. `timeout`, `user`,
+/// `yaml` at rank 11-13) — with a cap of 20 the common long-prompt
+/// regime is absorbed without inflating the per-response comparison
+/// cost (still ≤ 20 prefix comparisons per response token).
+///
+/// [`extract_topics`]: crate::cognition::detector::extract_topics
+const TOPIC_KEYWORD_CAP: usize = 20;
 
 /// Minimum length for morphological prefix matching in [`task_anchored`].
 ///
@@ -120,9 +144,9 @@ const MIN_STEM_PREFIX_LEN: usize = 4;
 /// alphabetical truncation — those remain documented limitations
 /// addressed by the adversarial tests.
 ///
-/// O(|task_tokens|) per response token; with `extract_topics`' top-10
-/// cap this is ≤ 10 comparisons — negligible versus the µs-scale cost
-/// of a `Regulator::decide` call.
+/// O(|task_tokens|) per response token; with `extract_topics_ranked`'s
+/// top-20 cap this is ≤ 20 comparisons — still negligible versus the
+/// µs-scale cost of a `Regulator::decide` call.
 fn task_anchored(
     response_token: &str,
     task_set: &HashSet<String>,
@@ -164,8 +188,9 @@ fn task_anchored(
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScopeTracker {
     /// Keywords extracted from the user's task message (opaque, in the
-    /// `detector::extract_topics` sense: lowercased, stop-words
-    /// filtered, min-length 3, top-10 alphabetical).
+    /// `detector::extract_topics_ranked` sense: lowercased, stop-words
+    /// filtered, min-length 3, top-20 by frequency + length +
+    /// alphabetical).
     task_keywords: Vec<String>,
     /// Keywords extracted from the LLM's response.
     response_keywords: Vec<String>,
@@ -182,7 +207,7 @@ impl ScopeTracker {
     /// mutation because scope state is per-turn — a fresh task must
     /// reset the baseline.
     pub fn set_task(&mut self, user_message: &str) {
-        self.task_keywords = detector::extract_topics(user_message);
+        self.task_keywords = detector::extract_topics_ranked(user_message, TOPIC_KEYWORD_CAP);
         self.response_keywords.clear();
     }
 
@@ -190,7 +215,7 @@ impl ScopeTracker {
     /// the tracker accumulates per-turn evidence before drift can be
     /// computed.
     pub fn set_response(&mut self, full_response: &str) {
-        self.response_keywords = detector::extract_topics(full_response);
+        self.response_keywords = detector::extract_topics_ranked(full_response, TOPIC_KEYWORD_CAP);
     }
 
     /// Keywords extracted from the most recent `set_task` call. Empty
@@ -211,8 +236,8 @@ impl ScopeTracker {
     /// `None` when either bag is empty (no baseline for comparison).
     ///
     /// Anchoring is two-tier: exact lowercased membership in the task
-    /// set OR bidirectional prefix match via [`task_anchored`] (both
-    /// tokens ≥ [`MIN_STEM_PREFIX_LEN`]). The prefix tier absorbs the
+    /// set OR bidirectional prefix match (both tokens must meet the
+    /// internal `MIN_STEM_PREFIX_LEN` minimum). The prefix tier absorbs the
     /// common English morphological class (`async` ↔ `asynchronous`,
     /// `await` ↔ `awaited`, `configure` ↔ `configured`) that the
     /// 2026-04-20 empirical Gemini smoke flagged as a false-positive
@@ -240,7 +265,9 @@ impl ScopeTracker {
     ///
     /// Empty when no response is set or when every response keyword is
     /// anchored in the task (exactly or via prefix). Ordering mirrors
-    /// [`response_tokens`](Self::response_tokens) (alphabetical).
+    /// [`response_tokens`](Self::response_tokens) (ranked by
+    /// frequency + length + alphabetical — see
+    /// [`detector::extract_topics_ranked`]).
     pub fn drift_tokens(&self) -> Vec<String> {
         let task_set = detector::to_topic_set(&self.task_keywords);
         self.response_keywords
@@ -492,23 +519,30 @@ mod tests {
     // can see exactly what is and isn't caught.
 
     #[test]
-    fn adversarial_rank_11_keyword_truncation_causes_false_positive() {
-        // KNOWN LIMITATION — documented, not a bug.
+    fn regression_rank_11_truncation_no_longer_falsely_flags() {
+        // Regression guard for the 2026-04-20 fix.
         //
-        // `extract_topics` sorts meaningful words alphabetically then
-        // truncates to top 10. On long task prompts with >10 meaningful
-        // words, alphabetically-late keywords get dropped. A response
-        // that reuses ONLY those dropped keywords appears as 100% drift
-        // even though it's on-topic.
+        // Before the fix, `extract_topics` sorted meaningful words
+        // alphabetically and truncated to top-10, dropping
+        // `timeout`, `user`, `yaml` on this 13-word task. A response
+        // reusing only those dropped keywords scored drift=1.0 — a
+        // false positive on an on-topic answer.
         //
-        // Task meaningful words (alphabetical):
-        //   async, authentication, cases, error, handling, module,
-        //   operations, proper, refactor, support, timeout, user, yaml
-        // Top-10 kept: async...support
-        // Truncated:   timeout, user, yaml
+        // After the fix, `extract_topics_ranked(text, 20)` keeps all
+        // 13 task words (cap=20 > 13), so the response's {timeout,
+        // users via prefix→user, yaml} anchor correctly and drift
+        // falls well below the warning threshold.
         //
-        // Response reuses only {users, configure, timeout, via, yaml}
-        // → overlap 0 against task top-10 → drift=1.0.
+        // Task meaningful words (all freq=1, varying length):
+        //   authentication (14), operations (10), handling (8),
+        //   refactor (8), support (7), timeout (7), module (6),
+        //   proper (6), async (5), cases (5), error (5),
+        //   user (4), yaml (4)
+        // With cap=20: all 13 survive.
+        //
+        // Response {configure, timeout, users, via, yaml} anchors
+        // {timeout (exact), users (prefix of user), yaml (exact)} →
+        // drift = 2/5 = 0.4 < DRIFT_WARN_THRESHOLD.
         let mut t = ScopeTracker::new();
         t.set_task(
             "refactor user authentication module support async \
@@ -517,10 +551,50 @@ mod tests {
         t.set_response("users should configure timeout via yaml");
         let drift = t.drift_score().expect("both sides populated");
         assert!(
+            drift < DRIFT_WARN_THRESHOLD,
+            "rank-11 truncation fix regressed: drift={drift} \
+             (expected < {DRIFT_WARN_THRESHOLD})"
+        );
+    }
+
+    #[test]
+    fn adversarial_rank_21_truncation_can_still_cause_false_positive() {
+        // KNOWN LIMITATION — narrower than before, still real.
+        //
+        // `extract_topics_ranked(text, 20)` raises the cap from 10 to
+        // 20 and uses frequency + length + alphabetical ranking. For
+        // typical task prompts this absorbs the rank-11 regime
+        // (regression test above). But very long detailed prompts
+        // with >20 meaningful words — all freq=1 — still drop
+        // length-short keywords at rank 21+. If a response reuses
+        // only those dropped short keywords, drift can still score
+        // high.
+        //
+        // The test is deliberate: it documents the remaining
+        // false-positive regime for future readers, so anyone
+        // investigating a high drift score on a long prompt can
+        // recognise the shape.
+        let mut t = ScopeTracker::new();
+        // 23 meaningful words, all distinct, all freq=1. Length-DESC
+        // ranking keeps the 20 longest; drops the 3 shortest.
+        t.set_task(
+            "authentication authorization availability benchmarking configuration \
+             deployment development distribution documentation environment \
+             integration monitoring observability optimization orchestration \
+             performance provisioning repository reproducibility scalability \
+             auth eks env",
+        );
+        // Response reuses the 3 shortest (auth, eks, env) — exactly
+        // the ones dropped after rank-20 length ordering.
+        t.set_response("auth eks env");
+        let drift = t.drift_score().expect("both sides populated");
+        assert!(
             drift >= DRIFT_WARN_THRESHOLD,
-            "rank-11 truncation gotcha documented: on-topic response \
-             scored drift={drift}. Embedding-based fallback for \
-             borderline cases is tracked as a post-0.3.0 follow-up."
+            "rank-21 truncation gotcha documented: on-topic response \
+             scored drift={drift}. Callers with latency budget to \
+             spare can pair with an embedding-based drift check on \
+             borderline-high scores, or raise TOPIC_KEYWORD_CAP in a \
+             future release when profiled safe."
         );
     }
 

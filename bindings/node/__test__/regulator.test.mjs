@@ -146,12 +146,28 @@ test('metrics snapshot exposes stable keys', () => {
     'noos.tool_total_duration_ms',
     'noos.tool_failure_count',
     'noos.implicit_corrections_count',
+    'noos.scope_drift_threshold',
   ]
   for (const key of expectedKeys) {
     assert.ok(key in snap, `missing metric key ${key}`)
     assert.equal(typeof snap[key], 'number')
   }
   assert.equal(snap['noos.cost_cap_tokens'], 5000)
+  assert.equal(snap['noos.scope_drift_threshold'], 0.5)
+})
+
+test('scope drift threshold builder accepts in range', () => {
+  const r = Regulator.forUser('u')
+  r.withScopeDriftThreshold(0.7)
+  assert.equal(r.scopeDriftThreshold(), 0.7)
+})
+
+test('scope drift threshold builder rejects invalid', () => {
+  const r = Regulator.forUser('u')
+  assert.throws(() => r.withScopeDriftThreshold(-0.1))
+  assert.throws(() => r.withScopeDriftThreshold(1.1))
+  assert.throws(() => r.withScopeDriftThreshold(Number.NaN))
+  assert.throws(() => r.withScopeDriftThreshold(Number.POSITIVE_INFINITY))
 })
 
 test('implicit correction off by default', () => {

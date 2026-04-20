@@ -397,6 +397,16 @@ pub struct Regulator {
     /// [`Self::implicit_corrections_count`] for observability. Not
     /// persisted (per-process counter).
     implicit_corrections_count: usize,
+    /// Drift-score threshold at or above which
+    /// [`Decision::ScopeDriftWarn`] fires in [`Self::decide`]. Defaults
+    /// to [`scope::DRIFT_WARN_THRESHOLD`] (0.5). Configurable via
+    /// [`Self::with_scope_drift_threshold`]: verbose LLMs (e.g., Gemini)
+    /// often exceed 0.5 even when on-topic, so the 2026-04-20 empirical
+    /// finding calls for a higher cutoff — typical adjusted value 0.7.
+    ///
+    /// Not persisted by [`Self::export`] — it's a caller-driven
+    /// configuration, not accumulated state.
+    scope_drift_threshold: f64,
 }
 
 impl Regulator {
@@ -417,6 +427,7 @@ impl Regulator {
             implicit_correction_window: None,
             last_turn_complete_at: None,
             implicit_corrections_count: 0,
+            scope_drift_threshold: DRIFT_WARN_THRESHOLD,
         }
     }
 
@@ -483,6 +494,45 @@ impl Regulator {
     /// counter also resets (per-process counter).
     pub fn with_implicit_correction_window(mut self, window: std::time::Duration) -> Self {
         self.implicit_correction_window = Some(window);
+        self
+    }
+
+    /// Builder: override the default scope-drift threshold used by
+    /// [`Decision::ScopeDriftWarn`] emission.
+    ///
+    /// ## Why this exists
+    ///
+    /// The default threshold [`scope::DRIFT_WARN_THRESHOLD`] (0.5) was
+    /// tuned against the Session 18 hand-crafted audit (≤ 20% total
+    /// error rate on 10 cases). The 2026-04-20 empirical Gemini smoke
+    /// run surfaced a real-world false-positive regime: verbose
+    /// pedagogical responses on technical prompts routinely score in
+    /// the `[0.5, 0.7)` band even when the response is on-topic — the
+    /// LLM is simply expanding the task keywords with peripheral
+    /// vocabulary. Apps targeting verbose model families can raise the
+    /// threshold to `0.7` to suppress the false-positive class without
+    /// losing sensitivity to the truly-disjoint-vocabulary case (which
+    /// scores ≥ 0.8).
+    ///
+    /// ## Guard
+    ///
+    /// Non-finite (`NaN` / `±inf`) and out-of-range values are silently
+    /// dropped — the regulator keeps the previously-set (or default)
+    /// threshold. This matches the fail-open pattern of the other
+    /// boundary inputs in the crate (see `track_cost`,
+    /// `record_quality`, `Token.logprob`).
+    ///
+    /// ## Persistence
+    ///
+    /// The threshold is NOT persisted by [`Self::export`] — it's a
+    /// caller-driven configuration, not accumulated state. After
+    /// `import`, callers must re-apply
+    /// `with_scope_drift_threshold(...)` if they want a non-default
+    /// value in the restored regulator.
+    pub fn with_scope_drift_threshold(mut self, threshold: f64) -> Self {
+        if threshold.is_finite() && (0.0..=1.0).contains(&threshold) {
+            self.scope_drift_threshold = threshold;
+        }
         self
     }
 
@@ -754,6 +804,16 @@ impl Regulator {
         self.implicit_corrections_count
     }
 
+    /// Current drift-score threshold used by [`Self::decide`] when
+    /// deciding whether to emit [`Decision::ScopeDriftWarn`].
+    ///
+    /// Matches whatever [`Self::with_scope_drift_threshold`] last
+    /// accepted, or [`scope::DRIFT_WARN_THRESHOLD`] (0.5) if the builder
+    /// was never called. Not persisted in [`RegulatorState`].
+    pub fn scope_drift_threshold(&self) -> f64 {
+        self.scope_drift_threshold
+    }
+
     /// One-call snapshot of every numeric observability signal the
     /// regulator exposes, as a map keyed by stable metric name. Drop
     /// straight into Prometheus / Datadog / StatsD pipelines without
@@ -770,6 +830,7 @@ impl Regulator {
     /// - `noos.tool_total_duration_ms` — per-turn tool wallclock sum
     /// - `noos.tool_failure_count` — per-turn tool failures
     /// - `noos.implicit_corrections_count` — per-process synthesised correction count
+    /// - `noos.scope_drift_threshold` — current `[0, 1]` cutoff for [`Decision::ScopeDriftWarn`]
     ///
     /// Does NOT call [`Self::decide`] — the decision is a separate,
     /// explicit call point. Snapshots are cheap (adds up individual
@@ -819,6 +880,10 @@ impl Regulator {
         m.insert(
             "noos.implicit_corrections_count".into(),
             self.implicit_corrections_count() as f64,
+        );
+        m.insert(
+            "noos.scope_drift_threshold".into(),
+            self.scope_drift_threshold,
         );
         m
     }
@@ -926,7 +991,7 @@ impl Regulator {
 
         // ── 4. Scope-drift warning ──
         if let Some(drift) = self.scope.drift_score() {
-            if drift >= DRIFT_WARN_THRESHOLD {
+            if drift >= self.scope_drift_threshold {
                 return Decision::ScopeDriftWarn {
                     drift_tokens: self.scope.drift_tokens(),
                     drift_score: drift,
@@ -1021,6 +1086,10 @@ impl Regulator {
             implicit_correction_window: None,
             last_turn_complete_at: None,
             implicit_corrections_count: 0,
+            // Scope-drift threshold is a caller-driven configuration too;
+            // callers re-apply `with_scope_drift_threshold` if they want a
+            // non-default cutoff.
+            scope_drift_threshold: DRIFT_WARN_THRESHOLD,
         }
     }
 
@@ -2527,6 +2596,7 @@ mod tests {
             "noos.tool_total_duration_ms",
             "noos.tool_failure_count",
             "noos.implicit_corrections_count",
+            "noos.scope_drift_threshold",
         ] {
             assert!(snap.contains_key(key), "missing metric key {key:?}");
             let v = snap[key];
@@ -2534,6 +2604,83 @@ mod tests {
         }
         // cost_cap_tokens should reflect the builder setting.
         assert!((snap["noos.cost_cap_tokens"] - 5_000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn scope_drift_threshold_defaults_to_constant() {
+        // Contract: a fresh regulator uses the crate-default
+        // `DRIFT_WARN_THRESHOLD`. Exposed both via the accessor and via
+        // metrics_snapshot so observability tooling can alert on drift.
+        let r = Regulator::for_user("u");
+        assert!((r.scope_drift_threshold() - DRIFT_WARN_THRESHOLD).abs() < f64::EPSILON);
+        let snap = r.metrics_snapshot();
+        assert!(
+            (snap["noos.scope_drift_threshold"] - DRIFT_WARN_THRESHOLD).abs() < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn scope_drift_threshold_builder_accepts_in_range() {
+        // 2026-04-20 empirical finding: verbose LLMs often score in
+        // [0.5, 0.7) on on-topic responses. Bumping the threshold to
+        // 0.7 suppresses that FP class.
+        let r = Regulator::for_user("u").with_scope_drift_threshold(0.7);
+        assert!((r.scope_drift_threshold() - 0.7).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn scope_drift_threshold_builder_rejects_invalid() {
+        // Contract: NaN, ±inf, or out-of-range inputs are dropped
+        // silently — the default is preserved. Fail-open mirrors the
+        // other boundary inputs in the crate (track_cost,
+        // record_quality, Token.logprob).
+        let r = Regulator::for_user("u")
+            .with_scope_drift_threshold(f64::NAN)
+            .with_scope_drift_threshold(f64::INFINITY)
+            .with_scope_drift_threshold(-0.1)
+            .with_scope_drift_threshold(1.1);
+        assert!(
+            (r.scope_drift_threshold() - DRIFT_WARN_THRESHOLD).abs() < f64::EPSILON,
+            "invalid inputs must leave the default in place"
+        );
+    }
+
+    #[test]
+    fn scope_drift_threshold_raises_suppresses_borderline_drift() {
+        // Contract: a borderline-drift case scoring in [0.5, 0.9)
+        // fires under the default 0.5 threshold but is suppressed by a
+        // 0.9 threshold. Exercised to make sure the builder actually
+        // feeds into the decide() gate.
+        //
+        // Task keywords: {async, explain, rust, runtime, tokio}
+        // Response keywords (top-10 alphabetical):
+        //   {async, driven, event, rust, runtime, scheduling, tasks,
+        //    timers, tokio}
+        // Anchored: {async, rust, runtime, tokio} → 4 of 9
+        // Drift = 5/9 ≈ 0.556 (in range).
+        let mut r_default = Regulator::for_user("u");
+        let mut r_lax = Regulator::for_user("u").with_scope_drift_threshold(0.9);
+
+        for r in [&mut r_default, &mut r_lax] {
+            r.on_event(LLMEvent::TurnStart {
+                user_message: "explain tokio runtime rust async".into(),
+            });
+            r.on_event(LLMEvent::TurnComplete {
+                full_response: "Tokio is async Rust runtime for scheduling \
+                    event driven tasks and timers".into(),
+            });
+        }
+
+        // Default threshold: the response scores ≥ 0.5 → fires.
+        assert!(
+            matches!(r_default.decide(), Decision::ScopeDriftWarn { .. }),
+            "default 0.5 threshold should fire on the borderline case"
+        );
+        // Lax threshold (0.9): same response passes as Continue.
+        assert!(
+            matches!(r_lax.decide(), Decision::Continue),
+            "threshold 0.9 should suppress the same borderline case"
+        );
     }
 
     #[test]

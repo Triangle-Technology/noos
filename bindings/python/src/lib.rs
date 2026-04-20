@@ -603,6 +603,39 @@ impl PyRegulator {
         Ok(slf)
     }
 
+    /// Mutable: override the default scope-drift threshold used by
+    /// `Decision.scope_drift_warn`. The default (0.5) was tuned for
+    /// the Session 18 hand-crafted audit; verbose LLMs (e.g. Gemini)
+    /// often score `[0.5, 0.7)` on on-topic responses, so apps
+    /// targeting those models can raise to 0.7 to suppress the false-
+    /// positive class without losing sensitivity to truly disjoint
+    /// responses (which score >= 0.8).
+    ///
+    /// Accepted range: `[0.0, 1.0]`. Non-finite or out-of-range values
+    /// raise `ValueError`.
+    ///
+    /// Returns self for chaining.
+    ///
+    /// Example:
+    ///
+    /// ```python
+    /// r = Regulator.for_user("alice").with_scope_drift_threshold(0.7)
+    /// ```
+    fn with_scope_drift_threshold<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        threshold: f64,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        if !threshold.is_finite() || !(0.0..=1.0).contains(&threshold) {
+            return Err(PyValueError::new_err(format!(
+                "threshold must be finite and within [0.0, 1.0], got {threshold}"
+            )));
+        }
+        let uid = slf.inner.user_id().to_string();
+        let taken = std::mem::replace(&mut slf.inner, RustRegulator::for_user(uid));
+        slf.inner = taken.with_scope_drift_threshold(threshold);
+        Ok(slf)
+    }
+
     /// Mutable: feed one event into the regulator. Requires
     /// mutation because the wrapped `CognitiveSession` accumulates
     /// state per turn and the regulator buffers responses between
@@ -682,6 +715,14 @@ impl PyRegulator {
     /// Per-process counter — resets on `from_json` (not persisted).
     fn implicit_corrections_count(&self) -> usize {
         self.inner.implicit_corrections_count()
+    }
+
+    /// The current scope-drift threshold — either the crate default
+    /// (0.5) or the last value accepted by
+    /// `with_scope_drift_threshold(...)`. Read-only; not persisted in
+    /// snapshots.
+    fn scope_drift_threshold(&self) -> f64 {
+        self.inner.scope_drift_threshold()
     }
 
     /// One-call snapshot of every numeric observability signal as a

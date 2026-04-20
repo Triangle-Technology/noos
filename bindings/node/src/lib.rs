@@ -564,6 +564,29 @@ impl Regulator {
         Ok(())
     }
 
+    /// Mutable: override the default scope-drift threshold used by
+    /// `Decision.kind === "scopeDriftWarn"`. Default is 0.5 — raise to
+    /// 0.7 on verbose models (e.g. Gemini) to suppress the on-topic
+    /// false-positive regime.
+    ///
+    /// Accepts `[0.0, 1.0]`. Throws on non-finite or out-of-range
+    /// values.
+    #[napi]
+    pub fn with_scope_drift_threshold(&mut self, threshold: f64) -> Result<()> {
+        if !threshold.is_finite() || !(0.0..=1.0).contains(&threshold) {
+            return Err(Error::new(
+                Status::InvalidArg,
+                format!(
+                    "threshold must be finite and within [0.0, 1.0], got {threshold}"
+                ),
+            ));
+        }
+        let uid = self.inner.user_id().to_string();
+        let taken = std::mem::replace(&mut self.inner, RustRegulator::for_user(uid));
+        self.inner = taken.with_scope_drift_threshold(threshold);
+        Ok(())
+    }
+
     /// Mutable: feed one event into the regulator. Requires
     /// mutation because the wrapped `CognitiveSession` accumulates
     /// state per turn and the regulator buffers responses between
@@ -648,6 +671,14 @@ impl Regulator {
     #[napi]
     pub fn implicit_corrections_count(&self) -> u32 {
         self.inner.implicit_corrections_count() as u32
+    }
+
+    /// The current scope-drift threshold — either the crate default
+    /// (0.5) or the last value accepted by
+    /// `withScopeDriftThreshold(...)`. Not persisted in snapshots.
+    #[napi]
+    pub fn scope_drift_threshold(&self) -> f64 {
+        self.inner.scope_drift_threshold()
     }
 
     // ── Identity + Path B helpers ─────────────────────────────────

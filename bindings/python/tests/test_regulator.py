@@ -258,6 +258,7 @@ def test_metrics_snapshot_exposes_stable_keys():
         "noos.tool_total_duration_ms",
         "noos.tool_failure_count",
         "noos.implicit_corrections_count",
+        "noos.scope_drift_threshold",
     }
     assert set(snap.keys()) == expected_keys
     for k, v in snap.items():
@@ -302,6 +303,46 @@ def test_with_implicit_correction_window_rejects_non_positive():
         Regulator.for_user("u").with_implicit_correction_window_secs(-1.0)
     with pytest.raises(ValueError):
         Regulator.for_user("u").with_implicit_correction_window_secs(float("nan"))
+
+
+def test_scope_drift_threshold_default():
+    """Fresh regulator uses the crate default (0.5)."""
+    r = Regulator.for_user("u")
+    assert r.scope_drift_threshold() == 0.5
+    assert r.metrics_snapshot()["noos.scope_drift_threshold"] == 0.5
+
+
+def test_scope_drift_threshold_builder_accepts_in_range():
+    r = Regulator.for_user("u").with_scope_drift_threshold(0.7)
+    assert r.scope_drift_threshold() == 0.7
+
+
+def test_scope_drift_threshold_builder_rejects_invalid():
+    with pytest.raises(ValueError):
+        Regulator.for_user("u").with_scope_drift_threshold(-0.1)
+    with pytest.raises(ValueError):
+        Regulator.for_user("u").with_scope_drift_threshold(1.1)
+    with pytest.raises(ValueError):
+        Regulator.for_user("u").with_scope_drift_threshold(float("nan"))
+    with pytest.raises(ValueError):
+        Regulator.for_user("u").with_scope_drift_threshold(float("inf"))
+
+
+def test_scope_drift_threshold_raises_suppresses_borderline():
+    """A borderline drift case fires under default 0.5 but is
+    suppressed by a 0.9 threshold."""
+    r_default = Regulator.for_user("u")
+    r_lax = Regulator.for_user("u").with_scope_drift_threshold(0.9)
+    for r in (r_default, r_lax):
+        r.on_event(LLMEvent.turn_start("explain tokio runtime rust async"))
+        r.on_event(
+            LLMEvent.turn_complete(
+                "Tokio is async Rust runtime for scheduling "
+                "event driven tasks and timers"
+            )
+        )
+    assert r_default.decide().kind == "scope_drift_warn"
+    assert r_lax.decide().kind == "continue"
 
 
 def test_otel_end_to_end_feeds_regulator():

@@ -85,13 +85,88 @@ pub fn extract_meaningful_words(text: &str, min_length: usize) -> HashSet<String
     result
 }
 
-/// Extract topics from text — meaningful words with min length 3.
+/// Extract topics from text — meaningful words with min length 3,
+/// deduplicated, sorted alphabetically, truncated to top 10.
+///
+/// **Stability note**: callers that use the output as a lookup key
+/// (e.g. [`build_topic_cluster`], `LearnedState.response_strategies`
+/// keying, `correction_patterns` keying) depend on the alphabetical
+/// ordering AND the top-10 cap to keep cluster identity stable across
+/// code changes. Do not switch this to a different ranking without
+/// migrating all persisted state that keys off it.
+///
+/// For contexts where identity stability does NOT matter — e.g.
+/// keyword-overlap comparison in [`regulator::scope`] — prefer
+/// [`extract_topics_ranked`], which uses frequency + length ranking
+/// and a configurable cap.
+///
+/// [`regulator::scope`]: crate::regulator::scope
 pub fn extract_topics(text: &str) -> Vec<String> {
     let words = extract_meaningful_words(text, 3);
     let mut topics: Vec<String> = words.into_iter().collect();
     topics.sort();
     topics.truncate(10);
     topics
+}
+
+/// Extract topics from text with importance-weighted ranking, truncated
+/// to `limit` keywords.
+///
+/// Ranking primary-to-tertiary:
+///
+/// 1. **Frequency DESC** — words repeated across the text are more
+///    content-bearing than one-off mentions.
+/// 2. **Length DESC** — when frequencies tie (common in short prompts
+///    where every meaningful word appears once), longer words carry
+///    more specificity than short ones. `authentication` outranks
+///    `user`.
+/// 3. **Alphabetical ASC** — deterministic tiebreak so repeated calls
+///    on the same input produce byte-identical output.
+///
+/// Compared to [`extract_topics`], this function:
+///
+/// - Accepts a configurable `limit` (scope-drift uses 20 to absorb
+///   longer prompts that alphabetical top-10 would truncate).
+/// - Surfaces keywords that are frequency- or length-salient even
+///   when alphabetically late (the 2026-04-20 empirical Gemini smoke
+///   showed `timeout` + `yaml` getting dropped at rank-11 alphabetical
+///   while being the exact words the response reused).
+///
+/// Does NOT change [`extract_topics`] — cluster identity + persisted
+/// state stay stable. Use this function only in comparison contexts
+/// (scope drift, similarity scoring) where the ordering is internal.
+///
+/// Same token definition as [`extract_meaningful_words`] (stop-word
+/// filter, min-length 3 unless the token is in the internal
+/// `TECH_TERMS` carve-out).
+pub fn extract_topics_ranked(text: &str, limit: usize) -> Vec<String> {
+    use std::collections::HashMap;
+
+    let lower = text.to_lowercase();
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for word in WORD_SPLITTER.split(&lower) {
+        let word = word.trim_matches(|c: char| !c.is_alphanumeric());
+        if word.is_empty() {
+            continue;
+        }
+        if STOP_WORDS.contains(word) {
+            continue;
+        }
+        if word.len() >= 3 || TECH_TERMS.contains(word) {
+            *counts.entry(word.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
+    // Sort key: (-freq, -len, word) — frequency and length descending
+    // (negated usize via Reverse), word ascending for determinism.
+    ranked.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| b.0.len().cmp(&a.0.len()))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    ranked.truncate(limit);
+    ranked.into_iter().map(|(word, _)| word).collect()
 }
 
 /// Convert topic list to a lowercase set for O(1) comparison.
@@ -281,6 +356,65 @@ pub fn detect_response_strategy_safe(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_topics_ranked_prefers_frequency() {
+        // Words repeated should outrank one-off mentions regardless of
+        // alphabetical position.
+        let topics = extract_topics_ranked(
+            "async async async code code pattern runtime tokio handler",
+            5,
+        );
+        // Top-2 should be the two most-frequent: `async` (3×), `code` (2×).
+        assert_eq!(topics[0], "async");
+        assert_eq!(topics[1], "code");
+    }
+
+    #[test]
+    fn extract_topics_ranked_length_tiebreaker() {
+        // All words freq=1 — length DESC decides order. Longer words
+        // surface first because they're typically more specific.
+        let topics = extract_topics_ranked("refactor user authentication", 10);
+        assert_eq!(topics[0], "authentication"); // len 14
+        assert_eq!(topics[1], "refactor"); // len 8
+        assert_eq!(topics[2], "user"); // len 4
+    }
+
+    #[test]
+    fn extract_topics_ranked_alphabetical_final_tiebreaker() {
+        // Freq=1, same length — alphabetical decides. This is the
+        // determinism guarantee.
+        let topics = extract_topics_ranked("zebra apple", 10);
+        assert_eq!(topics[0], "apple");
+        assert_eq!(topics[1], "zebra");
+    }
+
+    #[test]
+    fn extract_topics_ranked_honours_limit() {
+        let topics = extract_topics_ranked(
+            "one two three four five six seven eight nine ten eleven",
+            3,
+        );
+        assert_eq!(topics.len(), 3);
+    }
+
+    #[test]
+    fn extract_topics_ranked_dedupes_within_text() {
+        // Repeated words should be counted but returned once.
+        let topics = extract_topics_ranked("async async async", 10);
+        assert_eq!(topics.len(), 1);
+        assert_eq!(topics[0], "async");
+    }
+
+    #[test]
+    fn extract_topics_ranked_keeps_tech_terms_under_min_length() {
+        // Short tech terms (e.g. `ai`, `io`) bypass the min-length
+        // filter, matching `extract_topics` behaviour.
+        let topics = extract_topics_ranked("use ai and ml for QA", 10);
+        assert!(topics.contains(&"ai".to_string()));
+        assert!(topics.contains(&"ml".to_string()));
+        assert!(topics.contains(&"qa".to_string()));
+    }
 
     #[test]
     fn extract_topics_filters_stop_words() {
