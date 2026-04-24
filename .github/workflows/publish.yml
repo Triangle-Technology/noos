@@ -221,7 +221,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: addon-${{ matrix.target }}
-          path: bindings/node/*.node
+          # Include generated wrapper files alongside the .node binary.
+          # `napi build --platform` writes index.js + index.d.ts to the
+          # working directory root — without uploading them here, the
+          # published npm package has `main: "index.js"` pointing at a
+          # file that doesn't exist (0.1.0 bug).
+          path: |
+            bindings/node/*.node
+            bindings/node/index.js
+            bindings/node/index.d.ts
           if-no-files-found: error
 
   node-publish:
@@ -257,6 +265,18 @@ jobs:
           # Python download step above).
           merge-multiple: true
           path: bindings/node/artifacts
+
+      - name: Move wrapper files to package root
+        # index.js + index.d.ts are the same across all 5 target
+        # uploads (overwrote each other during merge-multiple). Move
+        # them to bindings/node/ root where package.json's `main`
+        # field points. Without this, the published package is missing
+        # its entry point — that was the 0.1.0 bug.
+        run: |
+          if [ -f artifacts/index.js ]; then
+            mv artifacts/index.js .
+            mv artifacts/index.d.ts .
+          fi
 
       - name: Create per-platform npm package dirs
         # napi 3.x stopped auto-creating these during `artifacts`; each

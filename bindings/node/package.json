@@ -1,6 +1,6 @@
 {
   "name": "@triangle-technology/noos",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reliability layer for LLM agents: scope drift, cost circuit breaks, procedural correction memory, tool-call loop detection as event-driven decisions.",
   "main": "index.js",
   "types": "index.d.ts",
